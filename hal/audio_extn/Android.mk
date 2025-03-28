@@ -336,8 +336,13 @@ LOCAL_MODULE := libspkrprot
 LOCAL_MODULE_OWNER := third_party
 LOCAL_VENDOR_MODULE := true
 
+ifeq ($(strip $(AUDIO_FEATURE_ENABLED_MOTOROLA_CIRRUS)),true)
+LOCAL_SRC_FILES := \
+        cirrus_edge20.c
+else
 LOCAL_SRC_FILES:= \
         spkr_protection.c
+endif
 
 LOCAL_CFLAGS += \
     -Wall \
