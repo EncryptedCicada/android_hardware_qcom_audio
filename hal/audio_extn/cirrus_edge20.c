@@ -102,19 +102,25 @@ struct pcm_config pcm_config_cirrus_rx = {
 static struct cirrus_playback_session handle;
 
 /*
- * Function: audio_extn_read_from_file
+ * Function: persist_read_from_file
  *
- * Reads a numerical value from the file at 'path' and stores it in *value.
+ * Reads a numerical value from the file at 'path' and stores it in *arr.
  * Returns 0 for success, but <0 values like -EINVAL or -ENOMEM etc, whichever is suitable, otherwise.
  */
-int audio_extn_read_from_file(char *path, long *value)
+int persist_read_from_file(char *path, uint8_t *arr, size_t arr_size)
 {
     int ret = 0;
+    
+    // Check if array is at least 4 bytes
+    if (arr_size != 4) {
+        ALOGE("%s: Provided array size is not suitable (size: %zu, required: 4)", __func__, arr_size);
+        return -EINVAL;
+    }
+
     FILE *stream = fopen(path, "rb");
     if (!stream) {
         ALOGE("%s: failed to open: %s", __func__, path);
-        ret = -ENOENT; // No such file or directory
-        goto early_exit:
+        return -ENOENT; // No such file or directory
     }
     
     fseek(stream, 0, SEEK_END);
@@ -135,33 +141,39 @@ int audio_extn_read_from_file(char *path, long *value)
     rewind(stream);
     char *buffer = calloc(len + 1, 1);
     if (!buffer) {
-        ALOGE("%s: memory allocation failure", __func__, path);
+        ALOGE("%s: memory allocation failure", __func__);
         ret = -ENOMEM; // Not enough memory
         goto check_error;
     }
-    
-    if (fgets_unlocked(buffer, len + 1, stream) == NULL) {
-        ALOGE("%s: '%s' file read error", __func__, path);
-        ret = -EIO; // Input/output error
+
+    if (fgets(buffer, len + 1, stream) == NULL) {
+        if (ferror(stream)) {
+            // A read error occurred
+            ALOGE("%s: Error reading from file: %s", __func__, strerror(errno));
+            ret = -EIO;
+        } else {
+            // EOF reached without reading anything
+            ALOGE("%s: No data read from file", __func__);
+            ret = -EINVAL;
+        }
         goto exit;
     }
-    
+
     errno = 0;
     char *endptr = NULL;
     long val = strtol(buffer, &endptr, 0);
     
     if (errno != 0 || *endptr != '\0') {
-        ALOGE("%s: strtol() parse failure", __func__, path);
+        ALOGE("%s: strtol() parse failure", __func__);
         ret = -EINVAL; // Invalid argument (parsing error)
         goto exit;
     }
     
-    *value = val;
+    *arr = val;
 exit:
     free(buffer);
 check_error:
     fclose(stream);
-early_exit:
     return ret;
 }
 
@@ -386,7 +398,7 @@ static int cirrus_exec_prot_fw_download(int do_reset) {
     prepare_control_name(ctl_name, sizeof(ctl_name), "SPK DSP1 Preload Switch");
     ret = cirrus_set_mixer_value_by_name(ctl_name, 1);
     if (ret < 0) {
-        ALOGE("%s: Cannot set %s to %s", __func__, ctl_name, fw_type);
+        ALOGE("%s: Cannot set %s to protection", __func__, ctl_name);
         goto exit;
     }
 
@@ -443,12 +455,26 @@ exit:
     return ret;
 }
 
+static inline int cirrus_set_force_wake(bool enable) {
+    int ret = 0;
+
+    ret = cirrus_set_mixer_value_by_name(CIRRUS_CTL_SPK_FORCE_WAKE, (int)enable);
+
+    if (ret < 0)
+        ALOGE("%s: Cannot %s force wakeup", __func__,
+              enable ? "enable" : "disable");
+    else
+        ALOGD("%s: Set %s %s", __func__, CIRRUS_CTL_SPK_FORCE_WAKE,
+              enable ? "enable" : "disable");
+    return ret;
+}
+
 static int cirrus_do_fw_download(int do_reset) {
     bool cal_valid = false, status_ok = false, checksum_ok = false;
     int i, max_retries = 32, ret = 0;
 
     for (i = 0; i < max_retries; i++) {
-        ret = cirrus_exec_prot_fw_download(0, do_reset);
+        ret = cirrus_exec_prot_fw_download(do_reset);
         if (ret == 0)
             break;
         usleep(500000);
@@ -532,62 +558,55 @@ void spkr_prot_init(void *adev, spkr_prot_init_config_t spkr_prot_init_config_va
         ALOGE("%s: Invalid params", __func__);
         return;
     }
+    
+    int ret = 0;
+    int32_t tmp = 0;
+    char prop_val[CONFIG_FILE_SIZE] = {0};
 
     memset(&handle, 0, sizeof(handle));
-    if (handle) {
-        handle.adev_handle = adev;
-        handle.state = INIT;
-        
-        int tmp = 0;
-        char prop_val[CONFIG_FILE_SIZE] = {0};
-        ret = audio_extn_read_from_file(PERSIST_CIRRUS_CAL_SPK_CAL_R, &handle.spk.cal_r);
-        if (ret < 0) {
-            ret = audio_extn_read_from_file(PERSIST_CIRRUS_CAL_SPK_CAL_AMBIENT, &handle.spk.cal_r);
-            if (ret == 0) {
-                break;
-            }
+
+    handle.adev_handle = adev;
+    handle.state = INIT;
+    
+    ret = persist_read_from_file(PERSIST_CIRRUS_CAL_SPK_CAL_R, &handle.spk.cal_r, sizeof(handle.spk.cal_r));
+    if (ret != 0) {
+        ret = persist_read_from_file(PERSIST_CIRRUS_CAL_SPK_CAL_AMBIENT, &handle.spk.cal_r, sizeof(handle.spk.cal_r));
+        if (ret != 0) {
             property_get("persist.vendor.audio.default.spkrdc", prop_val, CIRRUS_DEFAULT_CSPL_REDC);
             tmp = atoi(prop_val);
-            memcpy(handle.spk.cal_r, &tmp sizeof(tmp));
-            ALOGE("%s: Speaker Protection(CSPL) not calibrated on speaker, using default ReDC (%ld)", __func__, cal_val);
+            memcpy(handle.spk.cal_r, &tmp, sizeof(tmp));
+            ALOGE("%s: Speaker Protection(CSPL) not calibrated on speaker, using default ReDC (%d)", __func__, tmp);
         }
-
-        // init function pointers
-        fp_platform_get_snd_device_name = spkr_prot_init_config_val.fp_platform_get_snd_device_name;
-        fp_platform_get_pcm_device_id = spkr_prot_init_config_val.fp_platform_get_pcm_device_id;
-        fp_get_usecase_from_list =  spkr_prot_init_config_val.fp_get_usecase_from_list;
-        fp_disable_snd_device = spkr_prot_init_config_val.fp_disable_snd_device;
-        fp_enable_snd_device = spkr_prot_init_config_val.fp_enable_snd_device;
-        fp_disable_audio_route = spkr_prot_init_config_val.fp_disable_audio_route;
-        fp_enable_audio_route = spkr_prot_init_config_val.fp_enable_audio_route;
-        fp_audio_extn_get_snd_card_split = spkr_prot_init_config_val.fp_audio_extn_get_snd_card_split;
-
-        pthread_mutex_init(&handle.fb_prot_mutex, NULL);
-
-        spkr_prot_calib_init();
-
-        /* We assume calibration part is okay as there are no mixers for calibration */
-        handle.spk.cal_ok = true;
-
-        (void)pthread_create(&handle.calibration_thread,
-            (const pthread_attr_t *) NULL,
-            cirrus_do_calibration, &handle);
-        
-        return;
     }
-    ALOGE("%s: memory allocation failure: handle", __func__);
+
+    // init function pointers
+    fp_platform_get_snd_device_name = spkr_prot_init_config_val.fp_platform_get_snd_device_name;
+    fp_platform_get_pcm_device_id = spkr_prot_init_config_val.fp_platform_get_pcm_device_id;
+    fp_get_usecase_from_list =  spkr_prot_init_config_val.fp_get_usecase_from_list;
+    fp_disable_snd_device = spkr_prot_init_config_val.fp_disable_snd_device;
+    fp_enable_snd_device = spkr_prot_init_config_val.fp_enable_snd_device;
+    fp_disable_audio_route = spkr_prot_init_config_val.fp_disable_audio_route;
+    fp_enable_audio_route = spkr_prot_init_config_val.fp_enable_audio_route;
+    fp_audio_extn_get_snd_card_split = spkr_prot_init_config_val.fp_audio_extn_get_snd_card_split;
+
+    pthread_mutex_init(&handle.fb_prot_mutex, NULL);
+
+    /* We assume calibration part is okay as there are no mixers for calibration */
+    handle.spk.cal_ok = true;
+
+    (void)pthread_create(&handle.calibration_thread,
+        (const pthread_attr_t *) NULL,
+        cirrus_do_calibration, &handle);
+    
+    return;
 }
 
 int spkr_prot_deinit()
 {
     ALOGV("%s: Entry", __func__);
-    if (!handle) {
-        return 0;
-    }
 
     pthread_join(handle.calibration_thread, NULL);
     pthread_mutex_destroy(&handle.fb_prot_mutex);
-    free(&handle);
 
     ALOGV("%s: Exit", __func__);
     return 0;
@@ -619,20 +638,6 @@ static int cirrus_get_mixer_array_by_name(char* ctl_name, void* array, size_t co
               __func__, ctl_name, ret);
 exit:
     mixer_close(card_mixer);
-    return ret;
-}
-
-static inline int cirrus_set_force_wake(bool enable) {
-    int ret = 0;
-
-    ret = cirrus_set_mixer_value_by_name(CIRRUS_CTL_SPK_FORCE_WAKE, (int)enable);
-
-    if (ret < 0)
-        ALOGE("%s: Cannot %s force wakeup", __func__,
-              enable ? "enable" : "disable");
-    else
-        ALOGD("%s: Set %s %s", __func__, CIRRUS_CTL_SPK_FORCE_WAKE,
-              enable ? "enable" : "disable");
     return ret;
 }
 
