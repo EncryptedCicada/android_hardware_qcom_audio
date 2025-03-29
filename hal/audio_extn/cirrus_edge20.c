@@ -50,6 +50,7 @@ struct cirrus_playback_session {
     void *adev_handle;
     pthread_mutex_t fb_prot_mutex;
     pthread_t calibration_thread;
+    pthread_t failure_detect_thread;
     struct pcm *pcm_rx;
     struct pcm *pcm_tx;
     struct cirrus_cal_result_t spk;
@@ -169,7 +170,11 @@ int persist_read_from_file(char *path, uint8_t *arr, size_t arr_size)
         goto exit;
     }
     
-    *arr = val;
+    arr[0] = val & 0xFF;
+    arr[1] = (val >> 8) & 0xFF;
+    arr[2] = (val >> 16) & 0xFF;
+    arr[3] = (val >> 24) & 0xFF;
+
 exit:
     free(buffer);
 check_error:
@@ -254,6 +259,35 @@ static int cirrus_set_mixer_array_by_name(char* ctl_name, void* array, size_t co
     if (ret < 0)
         ALOGE("%s: Cannot set mixer %s",
               __func__, ctl_name);
+exit:
+    mixer_close(card_mixer);
+    return ret;
+}
+
+static int cirrus_get_mixer_array_by_name(char* ctl_name, void* array, size_t count) {
+    struct mixer *card_mixer = NULL;
+    struct mixer_ctl *ctl_config = NULL;
+    int sndcard_id = 0, ret = -EINVAL;
+
+    card_mixer = mixer_open(sndcard_id);
+    if (!card_mixer) {
+        ALOGE("%s: Cannot open mixer for card %d.", __func__, sndcard_id);
+        return -1;
+    }
+
+    ctl_config = mixer_get_ctl_by_name(card_mixer, ctl_name);
+    if (!ctl_config) {
+        ALOGE("%s: Cannot get mixer control %s", __func__, ctl_name);
+        ret = -1;
+        goto exit;
+    }
+
+    memset(array, 0, count);
+
+    ret = mixer_ctl_get_array(ctl_config, array, count);
+    if (ret < 0)
+        ALOGE("%s: Cannot get mixer %s value: error %d",
+              __func__, ctl_name, ret);
 exit:
     mixer_close(card_mixer);
     return ret;
@@ -568,9 +602,9 @@ void spkr_prot_init(void *adev, spkr_prot_init_config_t spkr_prot_init_config_va
     handle.adev_handle = adev;
     handle.state = INIT;
     
-    ret = persist_read_from_file(PERSIST_CIRRUS_CAL_SPK_CAL_R, &handle.spk.cal_r, sizeof(handle.spk.cal_r));
+    ret = persist_read_from_file(PERSIST_CIRRUS_CAL_SPK_CAL_R, handle.spk.cal_r, sizeof(handle.spk.cal_r));
     if (ret != 0) {
-        ret = persist_read_from_file(PERSIST_CIRRUS_CAL_SPK_CAL_AMBIENT, &handle.spk.cal_r, sizeof(handle.spk.cal_r));
+        ret = persist_read_from_file(PERSIST_CIRRUS_CAL_SPK_CAL_AMBIENT, handle.spk.cal_r, sizeof(handle.spk.cal_r));
         if (ret != 0) {
             property_get("persist.vendor.audio.default.spkrdc", prop_val, CIRRUS_DEFAULT_CSPL_REDC);
             tmp = atoi(prop_val);
@@ -605,40 +639,12 @@ int spkr_prot_deinit()
 {
     ALOGV("%s: Entry", __func__);
 
+    pthread_join(handle.failure_detect_thread, NULL);
     pthread_join(handle.calibration_thread, NULL);
     pthread_mutex_destroy(&handle.fb_prot_mutex);
 
     ALOGV("%s: Exit", __func__);
     return 0;
-}
-
-static int cirrus_get_mixer_array_by_name(char* ctl_name, void* array, size_t count) {
-    struct mixer *card_mixer = NULL;
-    struct mixer_ctl *ctl_config = NULL;
-    int sndcard_id = 0, ret = -EINVAL;
-
-    card_mixer = mixer_open(sndcard_id);
-    if (!card_mixer) {
-        ALOGE("%s: Cannot open mixer for card %d.", __func__, sndcard_id);
-        return -1;
-    }
-
-    ctl_config = mixer_get_ctl_by_name(card_mixer, ctl_name);
-    if (!ctl_config) {
-        ALOGE("%s: Cannot get mixer control %s", __func__, ctl_name);
-        ret = -1;
-        goto exit;
-    }
-
-    memset(array, 0, count);
-
-    ret = mixer_ctl_get_array(ctl_config, array, count);
-    if (ret < 0)
-        ALOGE("%s: Cannot get mixer %s value: error %d",
-              __func__, ctl_name, ret);
-exit:
-    mixer_close(card_mixer);
-    return ret;
 }
 
 static int cirrus_check_error_state(void) {
