@@ -338,7 +338,7 @@ LOCAL_VENDOR_MODULE := true
 
 ifeq ($(strip $(AUDIO_FEATURE_ENABLED_MOTOROLA_CIRRUS)),true)
 LOCAL_SRC_FILES := \
-        cirrus_edge20.c
+        mot_sp.c
 else
 LOCAL_SRC_FILES:= \
         spkr_protection.c
