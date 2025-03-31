@@ -24,6 +24,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <cutils/properties.h>
+#include <tinyalsa/asoundlib.h>
 #include "audio_extn.h"
 
 // - external function dependency -
@@ -526,6 +527,7 @@ use_default_cal:
     }
 
 apply_calibration:
+    // Start calibration
     {
         const char *cal_r_ctl = (type == 0) ? SPK_CAL_R_CTL : RCV_CAL_R_CTL;
 
@@ -539,14 +541,20 @@ apply_calibration:
             }
 
             ALOGV("%s: Speaker Protection(CSPL) ctl %s not found, update ctl and retry",
-                __func__, cal_r_ctl);
+                  __func__, cal_r_ctl);
             usleep(100000); // 100ms delay
+
+            ret = mixer_update_ctls(adev->mixer);
+            if (ret != 0)
+            {
+                ALOGV("mixer_update_ctls return failure, ret %d", ret);
+            }
         }
 
         if (mixer_ctl == NULL)
         {
             ALOGE("%s: ctl %s not found, failed to load Speaker Protection(CSPL) speaker calibration",
-                __func__, cal_r_ctl);
+                  __func__, cal_r_ctl);
             return;
         }
 
@@ -564,11 +572,11 @@ apply_calibration:
         }
 
         ALOGI("%s: write %s Protection(CSPL) speaker calibration %x %x %x %x (big-endian)",
-            __func__, device_str,
-            cal_value & 0xFF,
-            (cal_value >> 8) & 0xFF,
-            (cal_value >> 16) & 0xFF,
-            (cal_value >> 24) & 0xFF);
+              __func__, device_str,
+              cal_value & 0xFF,
+              (cal_value >> 8) & 0xFF,
+              (cal_value >> 16) & 0xFF,
+              (cal_value >> 24) & 0xFF);
 
         const char *cal_status_ctl = (type == 0) ? SPK_CAL_STATUS_CTL : RCV_CAL_STATUS_CTL;
         mixer_ctl = mixer_get_ctl_by_name(adev->mixer, cal_status_ctl);
@@ -588,9 +596,9 @@ apply_calibration:
         // Checksum is original value + 1, converted to big endian
         uint32_t checksum = handle.dev.cal_data + 1;
         checksum_value = ((checksum & 0xFF) << 24) |
-                        (((checksum >> 8) & 0xFF) << 16) |
-                        (((checksum >> 16) & 0xFF) << 8) |
-                        ((checksum >> 24) & 0xFF);
+                         (((checksum >> 8) & 0xFF) << 16) |
+                         (((checksum >> 16) & 0xFF) << 8) |
+                         ((checksum >> 24) & 0xFF);
 
         ret = mixer_ctl_set_array(mixer_ctl, &checksum_value, 1);
         if (ret != 0)
@@ -600,11 +608,11 @@ apply_calibration:
         }
 
         ALOGI("%s: write %s Protection(CSPL) speaker calibration checksum %x %x %x %x (big-endian)",
-            __func__, device_str,
-            checksum_value & 0xFF,
-            (checksum_value >> 8) & 0xFF,
-            (checksum_value >> 16) & 0xFF,
-            (checksum_value >> 24) & 0xFF);
+              __func__, device_str,
+              checksum_value & 0xFF,
+              (checksum_value >> 8) & 0xFF,
+              (checksum_value >> 16) & 0xFF,
+              (checksum_value >> 24) & 0xFF);
 
         // Set boot switch to 1
         const char *boot_switch_ctl = (type == 0) ? SPK_BOOT_SWITCH_CTL : RCV_BOOT_SWITCH_CTL;
