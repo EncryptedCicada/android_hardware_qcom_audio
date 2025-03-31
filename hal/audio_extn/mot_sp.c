@@ -24,7 +24,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <cutils/properties.h>
-#include <tinyalsa/asoundlib.h>
 #include "audio_extn.h"
 
 // - external function dependency -
@@ -544,11 +543,8 @@ apply_calibration:
                   __func__, cal_r_ctl);
             usleep(100000); // 100ms delay
 
-            ret = mixer_update_ctls(adev->mixer);
-            if (ret != 0)
-            {
-                ALOGV("mixer_update_ctls return failure, ret %d", ret);
-            }
+            mixer_close(0);
+            adev->mixer = mixer_open(0);
         }
 
         if (mixer_ctl == NULL)
