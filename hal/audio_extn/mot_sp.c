@@ -8,15 +8,23 @@
 #define LOG_TAG "audio_mot_sp"
 /*#define LOG_NDEBUG 0*/
 
-#include <stdio.h>
+#include <errno.h>
+#include <math.h>
+#include <log/log.h>
+#include <fcntl.h>
+#include "../audio_hw.h"
+#include "platform.h"
+#include "platform_api.h"
+#include <sys/stat.h>
+#include <linux/types.h>
 #include <stdlib.h>
+#include <stdio.h>
+#include <dlfcn.h>
+#include <pthread.h>
 #include <string.h>
 #include <unistd.h>
-#include <errno.h>
-#include "platform.h"
 #include <cutils/properties.h>
-#include <log/log.h>
-#include "../audio_hw.h"
+#include "audio_extn.h"
 
 // - external function dependency -
 static fp_platform_get_snd_device_name_t fp_platform_get_snd_device_name;
@@ -318,7 +326,7 @@ void *cspl_se_parameter_loading_thread()
     usecase->id = USECASE_AUDIO_PLAYBACK_LOW_LATENCY; /* Assuming this is the correct usecase ID (value 1) */
     usecase->type = PCM_PLAYBACK;
     usecase->in_snd_device = SND_DEVICE_NONE;
-    uc_info_rx->stream.out = adev->primary_output;
+    usecase->stream.out = adev->primary_output;
     list_init(&usecase->device_list);
     usecase->out_snd_device = SND_DEVICE_OUT_SPEAKER_EXTERNAL_1;
 

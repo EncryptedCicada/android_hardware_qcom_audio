@@ -336,13 +336,8 @@ LOCAL_MODULE := libspkrprot
 LOCAL_MODULE_OWNER := third_party
 LOCAL_VENDOR_MODULE := true
 
-ifeq ($(strip $(AUDIO_FEATURE_ENABLED_MOTOROLA_CIRRUS)),true)
-LOCAL_SRC_FILES := \
-        mot_sp.c
-else
 LOCAL_SRC_FILES:= \
         spkr_protection.c
-endif
 
 LOCAL_CFLAGS += \
     -Wall \
@@ -415,8 +410,13 @@ LOCAL_MODULE := libcirrusspkrprot
 LOCAL_MODULE_OWNER := third_party
 LOCAL_VENDOR_MODULE := true
 
+ifeq ($(strip $(AUDIO_FEATURE_ENABLED_MOTOROLA_CIRRUS)),true)
+LOCAL_SRC_FILES := \
+        mot_sp.c
+else
 LOCAL_SRC_FILES:= \
         cirrus_playback.c
+endif
 
 LOCAL_CFLAGS += \
     -Wall \
