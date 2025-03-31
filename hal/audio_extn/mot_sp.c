@@ -526,100 +526,100 @@ use_default_cal:
     }
 
 apply_calibration:
-{
-    const char *cal_r_ctl = (type == 0) ? SPK_CAL_R_CTL : RCV_CAL_R_CTL;
-}
-
-    // Try to get the control with retries in case it's not immediately available
-    for (retry_count = 0; retry_count < MAX_MIXER_CTL_RETRY; retry_count++)
     {
-        mixer_ctl = mixer_get_ctl_by_name(adev->mixer, cal_r_ctl);
-        if (mixer_ctl != NULL)
+        const char *cal_r_ctl = (type == 0) ? SPK_CAL_R_CTL : RCV_CAL_R_CTL;
+
+        // Try to get the control with retries in case it's not immediately available
+        for (retry_count = 0; retry_count < MAX_MIXER_CTL_RETRY; retry_count++)
         {
-            break;
+            mixer_ctl = mixer_get_ctl_by_name(adev->mixer, cal_r_ctl);
+            if (mixer_ctl != NULL)
+            {
+                break;
+            }
+
+            ALOGV("%s: Speaker Protection(CSPL) ctl %s not found, update ctl and retry",
+                __func__, cal_r_ctl);
+            usleep(100000); // 100ms delay
         }
 
-        ALOGV("%s: Speaker Protection(CSPL) ctl %s not found, update ctl and retry",
-              __func__, cal_r_ctl);
-        usleep(100000); // 100ms delay
-    }
+        if (mixer_ctl == NULL)
+        {
+            ALOGE("%s: ctl %s not found, failed to load Speaker Protection(CSPL) speaker calibration",
+                __func__, cal_r_ctl);
+            return;
+        }
 
-    if (mixer_ctl == NULL)
-    {
-        ALOGE("%s: ctl %s not found, failed to load Speaker Protection(CSPL) speaker calibration",
-              __func__, cal_r_ctl);
-        return;
-    }
+        // Convert calibration value to big-endian format
+        cal_value = ((handle.dev.cal_data & 0xFF) << 24) |
+                    (((handle.dev.cal_data >> 8) & 0xFF) << 16) |
+                    (((handle.dev.cal_data >> 16) & 0xFF) << 8) |
+                    ((handle.dev.cal_data >> 24) & 0xFF);
 
-    // Convert calibration value to big-endian format
-    cal_value = ((handle.dev.cal_data & 0xFF) << 24) |
-                (((handle.dev.cal_data >> 8) & 0xFF) << 16) |
-                (((handle.dev.cal_data >> 16) & 0xFF) << 8) |
-                ((handle.dev.cal_data >> 24) & 0xFF);
+        ret = mixer_ctl_set_array(mixer_ctl, &cal_value, 1);
+        if (ret != 0)
+        {
+            ALOGE("%s: Failed to set speaker calibration %s", __func__, cal_r_ctl);
+            return;
+        }
 
-    ret = mixer_ctl_set_array(mixer_ctl, &cal_value, 1);
-    if (ret != 0)
-    {
-        ALOGE("%s: Failed to set speaker calibration %s", __func__, cal_r_ctl);
-        return;
-    }
+        ALOGI("%s: write %s Protection(CSPL) speaker calibration %x %x %x %x (big-endian)",
+            __func__, device_str,
+            cal_value & 0xFF,
+            (cal_value >> 8) & 0xFF,
+            (cal_value >> 16) & 0xFF,
+            (cal_value >> 24) & 0xFF);
 
-    ALOGI("%s: write %s Protection(CSPL) speaker calibration %x %x %x %x (big-endian)",
-          __func__, device_str,
-          cal_value & 0xFF,
-          (cal_value >> 8) & 0xFF,
-          (cal_value >> 16) & 0xFF,
-          (cal_value >> 24) & 0xFF);
+        const char *cal_status_ctl = (type == 0) ? SPK_CAL_STATUS_CTL : RCV_CAL_STATUS_CTL;
+        mixer_ctl = mixer_get_ctl_by_name(adev->mixer, cal_status_ctl);
+        ret = mixer_ctl_set_array(mixer_ctl, &status_value, 1);
+        if (ret != 0)
+        {
+            ALOGE("%s: Failed to set speaker calibration status %s", __func__, cal_status_ctl);
+            return;
+        }
 
-    const char *cal_status_ctl = (type == 0) ? SPK_CAL_STATUS_CTL : RCV_CAL_STATUS_CTL;
-    mixer_ctl = mixer_get_ctl_by_name(adev->mixer, cal_status_ctl);
-    ret = mixer_ctl_set_array(mixer_ctl, &status_value, 1);
-    if (ret != 0)
-    {
-        ALOGE("%s: Failed to set speaker calibration status %s", __func__, cal_status_ctl);
-        return;
-    }
+        ALOGI("%s: write %s Protection(CSPL) speaker calibration status as 1", __func__, device_str);
 
-    ALOGI("%s: write %s Protection(CSPL) speaker calibration status as 1", __func__, device_str);
+        // Set checksum (original value + 1)
+        const char *cal_checksum_ctl = (type == 0) ? SPK_CAL_CHECKSUM_CTL : RCV_CAL_CHECKSUM_CTL;
+        mixer_ctl = mixer_get_ctl_by_name(adev->mixer, cal_checksum_ctl);
 
-    // Set checksum (original value + 1)
-    const char *cal_checksum_ctl = (type == 0) ? SPK_CAL_CHECKSUM_CTL : RCV_CAL_CHECKSUM_CTL;
-    mixer_ctl = mixer_get_ctl_by_name(adev->mixer, cal_checksum_ctl);
+        // Checksum is original value + 1, converted to big endian
+        uint32_t checksum = handle.dev.cal_data + 1;
+        checksum_value = ((checksum & 0xFF) << 24) |
+                        (((checksum >> 8) & 0xFF) << 16) |
+                        (((checksum >> 16) & 0xFF) << 8) |
+                        ((checksum >> 24) & 0xFF);
 
-    // Checksum is original value + 1, converted to big endian
-    uint32_t checksum = handle.dev.cal_data + 1;
-    checksum_value = ((checksum & 0xFF) << 24) |
-                     (((checksum >> 8) & 0xFF) << 16) |
-                     (((checksum >> 16) & 0xFF) << 8) |
-                     ((checksum >> 24) & 0xFF);
+        ret = mixer_ctl_set_array(mixer_ctl, &checksum_value, 1);
+        if (ret != 0)
+        {
+            ALOGE("%s: Failed to set speaker calibration checksum %s", __func__, cal_checksum_ctl);
+            return;
+        }
 
-    ret = mixer_ctl_set_array(mixer_ctl, &checksum_value, 1);
-    if (ret != 0)
-    {
-        ALOGE("%s: Failed to set speaker calibration checksum %s", __func__, cal_checksum_ctl);
-        return;
-    }
+        ALOGI("%s: write %s Protection(CSPL) speaker calibration checksum %x %x %x %x (big-endian)",
+            __func__, device_str,
+            checksum_value & 0xFF,
+            (checksum_value >> 8) & 0xFF,
+            (checksum_value >> 16) & 0xFF,
+            (checksum_value >> 24) & 0xFF);
 
-    ALOGI("%s: write %s Protection(CSPL) speaker calibration checksum %x %x %x %x (big-endian)",
-          __func__, device_str,
-          checksum_value & 0xFF,
-          (checksum_value >> 8) & 0xFF,
-          (checksum_value >> 16) & 0xFF,
-          (checksum_value >> 24) & 0xFF);
+        // Set boot switch to 1
+        const char *boot_switch_ctl = (type == 0) ? SPK_BOOT_SWITCH_CTL : RCV_BOOT_SWITCH_CTL;
+        mixer_ctl = mixer_get_ctl_by_name(adev->mixer, boot_switch_ctl);
+        if (mixer_ctl == NULL)
+        {
+            ALOGV("%s: has not boot switch contol", boot_switch_ctl);
+            return;
+        }
 
-    // Set boot switch to 1
-    const char *boot_switch_ctl = (type == 0) ? SPK_BOOT_SWITCH_CTL : RCV_BOOT_SWITCH_CTL;
-    mixer_ctl = mixer_get_ctl_by_name(adev->mixer, boot_switch_ctl);
-    if (mixer_ctl == NULL)
-    {
-        ALOGV("%s: has not boot switch contol", boot_switch_ctl);
-        return;
-    }
-
-    ret = mixer_ctl_set_value(mixer_ctl, 0, 1);
-    if (ret != 0)
-    {
-        ALOGE("%s: Failed to set Boot Switch, ctl: %s", __func__, boot_switch_ctl);
+        ret = mixer_ctl_set_value(mixer_ctl, 0, 1);
+        if (ret != 0)
+        {
+            ALOGE("%s: Failed to set Boot Switch, ctl: %s", __func__, boot_switch_ctl);
+        }
     }
 }
 
