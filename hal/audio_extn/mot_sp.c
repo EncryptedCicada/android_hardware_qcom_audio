@@ -526,7 +526,9 @@ use_default_cal:
     }
 
 apply_calibration:
+{
     const char *cal_r_ctl = (type == 0) ? SPK_CAL_R_CTL : RCV_CAL_R_CTL;
+}
 
     // Try to get the control with retries in case it's not immediately available
     for (retry_count = 0; retry_count < MAX_MIXER_CTL_RETRY; retry_count++)
@@ -540,12 +542,6 @@ apply_calibration:
         ALOGV("%s: Speaker Protection(CSPL) ctl %s not found, update ctl and retry",
               __func__, cal_r_ctl);
         usleep(100000); // 100ms delay
-
-        ret = mixer_update_ctls(adev->mixer);
-        if (ret != 0)
-        {
-            ALOGV("mixer_update_ctls return failure, ret %d", ret);
-        }
     }
 
     if (mixer_ctl == NULL)
@@ -637,19 +633,10 @@ int spkr_prot_calib_init()
     int ret = 0;
 
     // Check for CSPL (Cirrus Logic Speaker Protection)
-    ret = cspl_apply_calibration(SPEAKER); // Try speaker
-    if (ret == 0)
-    {
-        ret = cspl_apply_calibration(RECEIVER); // Try receiver
-        if (ret == 0)
-        {
-            handle.cal_ok = true; // CSPL protection status
-            return 0;
-        }
-    }
-
-    // CSPL supported speaker protection not detected
-    return -EINVAL;
+    cspl_apply_calibration(SPEAKER);  // Try speaker
+    cspl_apply_calibration(RECEIVER); // Try receiver
+    handle.cal_ok = true;             // CSPL protection status
+    return 0;
 }
 
 void spkr_prot_init(void *adev)
@@ -674,7 +661,7 @@ void spkr_prot_init(void *adev)
     fp_enable_audio_route = spkr_prot_init_config_val.fp_enable_audio_route;
     fp_platform_check_and_set_codec_backend_cfg = spkr_prot_init_config_val.fp_platform_check_and_set_codec_backend_cfg;
 
-    spkr_prot_calib_init();
+    (void)spkr_prot_calib_init();
 
     pthread_mutex_init(&handle.fb_prot_mutex, NULL);
 
@@ -718,43 +705,6 @@ int spkr_prot_deinit()
     return ret;
 }
 
-/**
- * Implementation for the speaker protection start processing
- *
- * This function handles mapping regular speaker devices to their
- * protected variants and enabling the necessary processing.
- *
- * @param snd_device The sound device ID
- * @return 0 on success, non-zero on failure
- */
-int spkr_prot_start_processing(snd_device_t snd_device)
-{
-    int ret = 0;
-    snd_device_t protected_snd_device;
-
-    // Check if speaker protection is enabled
-    if (!handle.cal_ok)
-    {
-        return 0;
-    }
-
-    // Map the regular sound device to its protected variant
-    protected_snd_device = get_spkr_prot_snd_device(snd_device);
-
-    // If the device isn't changed, no protection needed
-    if (protected_snd_device == snd_device)
-    {
-        return 0;
-    }
-
-    ALOGI("%s: Processing started for snd_device=%d (protected=%d)",
-          __func__, snd_device, protected_snd_device);
-
-    // Additional processing logic would go here
-
-    return ret;
-}
-
 /* Taken directly from cirrus_sony since decompilation is not good */
 int get_spkr_prot_snd_device(snd_device_t snd_device)
 {
@@ -770,6 +720,12 @@ int get_spkr_prot_snd_device(snd_device_t snd_device)
     default:
         return snd_device;
     }
+}
+
+/* Dummy, since decompilation is not good */
+int spkr_prot_start_processing(__unused snd_device_t snd_device)
+{
+    return 0;
 }
 
 /* Dummy, since decompilation is not good */
