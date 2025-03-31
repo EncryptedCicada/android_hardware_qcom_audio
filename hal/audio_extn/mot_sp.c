@@ -639,7 +639,7 @@ int spkr_prot_calib_init()
     return 0;
 }
 
-void spkr_prot_init(void *adev)
+void spkr_prot_init(void *adev, spkr_prot_init_config_t spkr_prot_init_config_val)
 {
 
     if (!adev)
