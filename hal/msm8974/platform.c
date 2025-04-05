@@ -51,6 +51,10 @@
 #include "sound/msmcal-hwdep.h"
 #include <dirent.h>
 
+#ifdef MOTOROLA_AUDIO
+#include "mot_sp.h"
+#endif
+
 #include "../audio_hw_lvacfs.h"
 #include "../audio_hw_lvimfs.h"
 #ifdef DYNAMIC_LOG_ENABLED
