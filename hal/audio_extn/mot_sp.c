@@ -192,7 +192,7 @@ use_default_cal:
         const char *prop_name = (type == 0) ? SPK_DEFAULT_RDC_PROP : RCV_DEFAULT_RDC_PROP;
         if (property_get(prop_name, ctl_value, "0") < 1)
         {
-            ALOGWE"%s: Speaker Protection(CSPL) not calibrated on %s, use .bin default ReDC",
+            ALOGW("%s: Speaker Protection(CSPL) not calibrated on %s, use .bin default ReDC",
                   __func__, device_str);
             return;
         }
@@ -217,31 +217,37 @@ apply_calibration:
     {
         const char *cal_r_ctl = (type == 0) ? SPK_CAL_R_CTL : RCV_CAL_R_CTL;
 
+        struct mixer *temp_mixer = NULL;
+        struct mixer_ctl *temp_ctl = NULL;
         // Try to get the control with retries in case it's not immediately available
         for (retry_count = 0; retry_count < MAX_MIXER_CTL_RETRY; retry_count++)
         {
-            mixer_ctl = mixer_get_ctl_by_name(adev->mixer, cal_r_ctl);
-            if (mixer_ctl != NULL)
+            temp_mixer = mixer_open(adev->snd_card);
+            if (!temp_mixer)
             {
+                ALOGE("%s: Cannot open mixer for card %d.", __func__, sndcard_id);
+                return;
+            }
+
+            temp_ctl = mixer_get_ctl_by_name(temp_mixer, cal_r_ctl);
+            if (!temp_ctl)
+            {
+                ALOGW("%s: Speaker Protection(CSPL) ctl %s not found, update ctl and retry",
+                      __func__, cal_r_ctl);
                 break;
             }
 
-            ALOGW("%s: Speaker Protection(CSPL) ctl %s not found, update ctl and retry",
-                  __func__, cal_r_ctl);
             usleep(100000); // 100ms delay
-
-            ret = mixer_add_new_ctls(adev->mixer);
-            if (ret != 0)
-            {
-                ALOGV("%s: mixer_add_new_ctls return failure, ret %d", __func__, ret);
-            }
         }
+
+        mixer_ctl = temp_ctl;
+        mixer_close(temp_mixer);
 
         if (mixer_ctl == NULL)
         {
             ALOGE("%s: ctl %s not found, failed to load Speaker Protection(CSPL) speaker calibration",
                   __func__, cal_r_ctl);
-            return;
+            goto exit;
         }
 
         // Convert calibration value to big-endian format
@@ -264,7 +270,7 @@ apply_calibration:
         if (ret != 0)
         {
             ALOGE("%s: Failed to set speaker calibration %s", __func__, cal_r_ctl);
-            return;
+            goto exit;
         }
 
         if (type == 0)
@@ -285,7 +291,7 @@ apply_calibration:
         if (ret != 0)
         {
             ALOGE("%s: Failed to set speaker calibration status %s", __func__, cal_status_ctl);
-            return;
+            goto exit;
         }
 
         ALOGI("%s: write %s Protection(CSPL) speaker calibration status as 1", __func__, device_str);
@@ -305,7 +311,7 @@ apply_calibration:
         if (ret != 0)
         {
             ALOGE("%s: Failed to set speaker calibration checksum %s", __func__, cal_checksum_ctl);
-            return;
+            goto exit;
         }
 
         ALOGI("%s: write %s Protection(CSPL) speaker calibration checksum %x %x %x %x (big-endian)",
@@ -321,7 +327,7 @@ apply_calibration:
         if (mixer_ctl == NULL)
         {
             ALOGW("%s: has not boot switch contol", boot_switch_ctl);
-            return;
+            goto exit;
         }
 
         ret = mixer_ctl_set_value(mixer_ctl, 0, 1);
@@ -329,6 +335,10 @@ apply_calibration:
         {
             ALOGE("%s: Failed to set Boot Switch, ctl: %s", __func__, boot_switch_ctl);
         }
+
+    exit:
+        mixer_close(temp_mixer);
+        return;
     }
 }
 
