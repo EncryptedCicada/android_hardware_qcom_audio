@@ -415,6 +415,9 @@ struct platform_data {
     struct listnode custom_mtmx_in_params_list;
     struct power_mode_cfg power_mode_cfg[SND_DEVICE_MAX];
     struct island_cfg island_cfg[SND_DEVICE_MAX];
+#ifdef MOTOROLA_AUDIO
+    void *mot_handle;
+#endif
 };
 
 struct  spkr_device_chmap {
@@ -4349,6 +4352,11 @@ acdb_init_fail:
     if (property_get_bool("persist.vendor.audio.apptype.multirec.enabled", false))
         my_data->use_generic_handset = true;
 
+#ifdef MOTOROLA_AUDIO
+    /* Motorola customization for berlin audio */
+    my_data->mot_handle = audio_extn_mot_spkr_prot_init(my_data->adev);
+#endif
+
     /* Initialize keep alive for HDMI/loopback silence */
     audio_extn_keep_alive_init(adev);
 
@@ -4559,6 +4567,11 @@ void platform_deinit(void *platform)
     struct external_specific_device *ext_dev;
     struct app_type_entry *ap;
     struct listnode *node;
+
+#ifdef MOTOROLA_AUDIO
+    /* Motorola customization for berlin audio */
+    audio_extn_mot_spkr_prot_deinit(my_data->mot_handle);
+#endif
 
     audio_extn_keep_alive_deinit();
     platform_reset_edid_info(my_data);

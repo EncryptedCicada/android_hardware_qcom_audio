@@ -186,6 +186,11 @@ LOCAL_SRC_FILES += audio_extn/audio_extn.c \
                    voice_extn/compress_voip.c \
                    voice_extn/voice_extn.c
 
+ifeq ($(strip $(AUDIO_FEATURE_ENABLED_MOTOROLA)),true)
+  LOCAL_SRC_FILES += audio_extn/mot_sp.c
+  LOCAL_CFLAGS += -DMOTOROLA_AUDIO
+endif
+
 LOCAL_SHARED_LIBRARIES := \
     libbase \
     liblog \
