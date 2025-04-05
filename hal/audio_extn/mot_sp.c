@@ -225,7 +225,7 @@ apply_calibration:
             temp_mixer = mixer_open(adev->snd_card);
             if (!temp_mixer)
             {
-                ALOGE("%s: Cannot open mixer for card %d.", __func__, sndcard_id);
+                ALOGE("%s: Cannot open mixer for card %d.", __func__, adev->snd_card);
                 return;
             }
 
