@@ -461,6 +461,7 @@ void cspl_apply_calibration(device_identifier type)
     char ctl_value[CIRRUS_CTL_NAME_BUF] = {0};
     struct audio_device *adev = handle.adev_handle;
     struct mixer_ctl *mixer_ctl = NULL;
+    struct mixer *local_mixer = NULL;
     int retry_count = 0;
     int ret = 0;
     const char *device_str = (type == 0) ? "speaker" : "receiver";
@@ -468,7 +469,7 @@ void cspl_apply_calibration(device_identifier type)
     // Determine firmware control name based on device choice
     const char *firmware_ctl = (type == 0) ? SPK_FIRMWARE_CTL : RCV_FIRMWARE_CTL;
 
-    // Check if firmware control exists
+    // Check if firmware control exists using the adev mixer
     mixer_ctl = mixer_get_ctl_by_name(adev->mixer, firmware_ctl);
     if (mixer_ctl == NULL)
     {
@@ -545,25 +546,42 @@ apply_calibration:
     // Start calibration
     {
         const char *cal_r_ctl = (type == 0) ? SPK_CAL_R_CTL : RCV_CAL_R_CTL;
+        int card_idx = adev->snd_card;
 
         // Try to get the control with retries in case it's not immediately available
         for (retry_count = 0; retry_count < MAX_MIXER_CTL_RETRY; retry_count++)
         {
+            // First try with existing adev mixer
             mixer_ctl = mixer_get_ctl_by_name(adev->mixer, cal_r_ctl);
             if (mixer_ctl != NULL)
             {
                 break;
             }
 
-            ALOGV("%s: Speaker Protection(CSPL) ctl %s not found, update ctl and retry",
+            ALOGV("%s: Speaker Protection(CSPL) ctl %s not found, creating new mixer and retry",
                   __func__, cal_r_ctl);
-            usleep(100000); // 100ms delay
-
-            // ret = mixer_update_ctls(adev->mixer);
-            // if (ret != 0)
-            // {
-            //     ALOGV("mixer_update_ctls return failure, ret %d", ret);
-            // }
+            
+            // Instead of updating adev->mixer, create a new local mixer
+            // Close previous local_mixer if it exists
+            if (local_mixer != NULL) {
+                mixer_close(local_mixer);
+                local_mixer = NULL;
+            }
+            
+            // Create a new mixer instance
+            local_mixer = mixer_open(card_idx);
+            if (local_mixer == NULL) {
+                ALOGE("%s: Failed to open mixer for card %d", __func__, card_idx);
+                goto exit;
+            }
+            
+            // Try with the new local mixer
+            mixer_ctl = mixer_get_ctl_by_name(local_mixer, cal_r_ctl);
+            if (mixer_ctl != NULL) {
+                break;
+            }
+            
+            usleep(100000); // 100ms delay before retry
         }
 
         if (mixer_ctl == NULL)
@@ -572,6 +590,11 @@ apply_calibration:
                   __func__, cal_r_ctl);
             goto exit;
         }
+
+        // From this point, use the mixer that successfully found the control
+        struct mixer *active_mixer = (local_mixer != NULL && 
+                                     mixer_get_ctl_by_name(local_mixer, cal_r_ctl) != NULL) ? 
+                                     local_mixer : adev->mixer;
 
         // Convert calibration value to big-endian format
         if (type == 0)
@@ -589,6 +612,8 @@ apply_calibration:
                         ((handle.rcv.cal_data >> 24) & 0xFF);
         }
 
+        // Get the control again from the active mixer to ensure we're using the right one
+        mixer_ctl = mixer_get_ctl_by_name(active_mixer, cal_r_ctl);
         ret = mixer_ctl_set_array(mixer_ctl, &cal_value, 1);
         if (ret != 0)
         {
@@ -609,7 +634,7 @@ apply_calibration:
               (cal_value >> 24) & 0xFF);
 
         const char *cal_status_ctl = (type == 0) ? SPK_CAL_STATUS_CTL : RCV_CAL_STATUS_CTL;
-        mixer_ctl = mixer_get_ctl_by_name(adev->mixer, cal_status_ctl);
+        mixer_ctl = mixer_get_ctl_by_name(active_mixer, cal_status_ctl);
         ret = mixer_ctl_set_array(mixer_ctl, &status_value, 1);
         if (ret != 0)
         {
@@ -621,7 +646,7 @@ apply_calibration:
 
         // Set checksum (original value + 1)
         const char *cal_checksum_ctl = (type == 0) ? SPK_CAL_CHECKSUM_CTL : RCV_CAL_CHECKSUM_CTL;
-        mixer_ctl = mixer_get_ctl_by_name(adev->mixer, cal_checksum_ctl);
+        mixer_ctl = mixer_get_ctl_by_name(active_mixer, cal_checksum_ctl);
 
         // Checksum is original value + 1, converted to big endian
         uint32_t checksum = ((type == 0) ? handle.spk.cal_data : handle.rcv.cal_data) + 1;
@@ -646,7 +671,7 @@ apply_calibration:
 
         // Set boot switch to 1
         const char *boot_switch_ctl = (type == 0) ? SPK_BOOT_SWITCH_CTL : RCV_BOOT_SWITCH_CTL;
-        mixer_ctl = mixer_get_ctl_by_name(adev->mixer, boot_switch_ctl);
+        mixer_ctl = mixer_get_ctl_by_name(active_mixer, boot_switch_ctl);
         if (mixer_ctl == NULL)
         {
             ALOGW("%s: has not boot switch contol", boot_switch_ctl);
@@ -660,6 +685,11 @@ apply_calibration:
         }
 
     exit:
+        // Clean up the local mixer if we created one
+        if (local_mixer != NULL) {
+            mixer_close(local_mixer);
+            local_mixer = NULL;
+        }
         return;
     }
 }
