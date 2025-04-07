@@ -406,10 +406,6 @@ void spkr_prot_init(void *adev, spkr_prot_init_config_t spkr_prot_init_config_va
     handle.adev_handle = adev;
     handle.state = INIT;
 
-#ifdef DEBUG_SHOW_VALUES
-    log_mixer_controls(0);
-#endif
-
     /* Ambient */
     ret = get_file_data(PERSIST_CIRRUS_CAL_GLOBAL_CAL_AMBIENT, &cal_ambient, sizeof(cal_ambient), true);
     if (ret)
@@ -995,12 +991,12 @@ static int cirrus_exec_fw_download(const char *fw_type, const char *channel,
         goto exit;
     }
 
-    if (!strcmp(fw_type, "Protection"))
+    if (!strcmp(fw_type, "protection"))
     {
         ret = cirrus_format_mixer_name("SPK DSP1X protection cd CSPL_ENABLE",
                                        channel, ctl_name, sizeof(ctl_name));
     }
-    else if (!strcmp(fw_type, "Calibration"))
+    else if (!strcmp(fw_type, "calibration"))
     {
         ret = cirrus_format_mixer_name("SPK DSP1X calibration cd CSPL_ENABLE",
                                        channel, ctl_name, sizeof(ctl_name));
@@ -1405,7 +1401,7 @@ static int cirrus_do_fw_mono_download(int do_reset)
 
     for (i = 0; i < max_retries; i++)
     {
-        ret = cirrus_exec_fw_download("Protection", 0, do_reset);
+        ret = cirrus_exec_fw_download("protection", 0, do_reset);
         if (ret == 0)
             break;
         usleep(500000);
@@ -1467,7 +1463,7 @@ static int cirrus_do_fw_stereo_download(int do_reset)
 
     for (i = 0; i < max_retries; i++)
     {
-        ret = cirrus_exec_fw_download("Protection", "R", do_reset);
+        ret = cirrus_exec_fw_download("protection", "R", do_reset);
         if (ret == 0)
             break;
         usleep(500000);
@@ -1491,7 +1487,7 @@ static int cirrus_do_fw_stereo_download(int do_reset)
 
     for (i = 0; i < max_retries; i++)
     {
-        ret = cirrus_exec_fw_download("Protection", "L", do_reset);
+        ret = cirrus_exec_fw_download("protection", "L", do_reset);
         if (ret == 0)
             break;
         usleep(500000);
@@ -1579,11 +1575,11 @@ static int cirrus_do_fw_calibration_download(struct cirrus_playback_session *hdl
 {
     int ret = 0;
 
-    ret = cirrus_exec_fw_download("Calibration", 0, 0);
+    ret = cirrus_exec_fw_download("calibration", 0, 0);
     if (ret < 0)
     {
-        ret = cirrus_exec_fw_download("Calibration", "L", 0);
-        ret += cirrus_exec_fw_download("Calibration", "R", 0);
+        ret = cirrus_exec_fw_download("calibration", "L", 0);
+        ret += cirrus_exec_fw_download("calibration", "R", 0);
         if (ret != 0)
             return ret;
 
