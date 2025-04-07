@@ -227,32 +227,63 @@ static int get_file_data(const char *filepath, void *buf, size_t size, bool reve
     uint8_t *array = (uint8_t *)buf;
     uint8_t tmp;
     int i, ret = 0;
-
+    long file_size;
+    
     fp = fopen(filepath, "rb");
-    if (fp == NULL)
-    {
+    if (fp == NULL) {
         ALOGE("%s: Cannot open file %s for reading: %s", __func__, filepath, strerror(errno));
         return -ENOENT;
     }
-
-    if (fread(buf, size, 1, fp) != 1)
-    {
-        ALOGE("%s: Failed to read %zu bytes from %s", __func__, size, filepath);
+    
+    fseek(fp, 0, SEEK_END);
+    file_size = ftell(fp);
+    rewind(fp);
+    
+    // Verify file size is reasonable and large enough
+    if (file_size <= 0 || file_size < size || file_size >= 32) {
+        ALOGE("%s: '%s' file size error: %ld (expected %zu)", __func__, filepath, file_size, size);
+        ret = -EINVAL;
+        goto exit;
+    }
+    
+    char *buffer = (char *)calloc(file_size + 1, 1);
+    if (buffer == NULL) {
+        ALOGE("%s: memory allocation failure", __func__);
+        ret = -ENOMEM;
+        goto exit;
+    }
+    
+    if (fread(buffer, file_size, 1, fp) != 1) {
+        ALOGE("%s: Failed to read %ld bytes from %s", __func__, file_size, filepath);
+        free(buffer);
         ret = -EIO;
         goto exit;
     }
-
-    if (reverse)
-    {
-        /* Invert the array, because Sony firmware expects inverted values */
-        for (i = 0; i < size / 2; i++)
-        {
+    
+    char *endptr = NULL;
+    long value;
+    errno = 0;
+    value = strtol(buffer, &endptr, 0);
+    
+    if (errno == 0 && *endptr == '\0' || *endptr == '\n') {
+        // It's a text file with a number - convert to binary format
+        memcpy(buf, &value, size);
+    } else {
+        // It's already binary data - use as-is
+        memcpy(buf, buffer, size);
+    }
+    
+    free(buffer);
+    
+    if (reverse) {
+        /* Invert the array, because DSP firmware expects inverted values */
+        for (i = 0; i < size / 2; i++) {
             tmp = array[i];
             array[i] = array[size - i - 1];
             array[size - i - 1] = tmp;
         }
     }
-
+    
 #ifdef PERSIST_DEBUG
     ALOGI("%s: Read file %s (size=%zu) values: 0x%x 0x%x 0x%x 0x%x",
           __func__, filepath, size, array[0], array[1], array[2], array[3]);
