@@ -336,8 +336,13 @@ LOCAL_MODULE := libspkrprot
 LOCAL_MODULE_OWNER := third_party
 LOCAL_VENDOR_MODULE := true
 
+ifeq ($(strip $(AUDIO_FEATURE_ENABLED_MOTOROLA)),true)
+LOCAL_SRC_FILES:= \
+        mot_sp.c
+else
 LOCAL_SRC_FILES:= \
         spkr_protection.c
+endif
 
 LOCAL_CFLAGS += \
     -Wall \
@@ -345,7 +350,9 @@ LOCAL_CFLAGS += \
     -Wno-unused-function \
     -Wno-unused-variable \
 
+ifneq ($(strip $(AUDIO_FEATURE_ENABLED_MOTOROLA)),true)
 LOCAL_CFLAGS += -DSPKR_PROT_ENABLED
+endif
 
 LOCAL_SHARED_LIBRARIES := \
     libaudioutils \
@@ -410,12 +417,8 @@ LOCAL_MODULE := libcirrusspkrprot
 LOCAL_MODULE_OWNER := third_party
 LOCAL_VENDOR_MODULE := true
 
-ifeq ($(strip $(AUDIO_FEATURE_ENABLED_MOTOROLA)),true)
-LOCAL_SRC_FILES:= mot_sp.c
-else
 LOCAL_SRC_FILES:= \
         cirrus_playback.c
-endif
 
 LOCAL_CFLAGS += \
     -Wall \
@@ -423,10 +426,8 @@ LOCAL_CFLAGS += \
     -Wno-unused-function \
     -Wno-unused-variable \
 
-ifneq ($(strip $(AUDIO_FEATURE_ENABLED_MOTOROLA)),true)
 LOCAL_CFLAGS += -DENABLE_CIRRUS_DETECTION
 LOCAL_CFLAGS += -DCIRRUS_FACTORY_CALIBRATION
-endif
 
 LOCAL_SHARED_LIBRARIES := \
     libaudioutils \
