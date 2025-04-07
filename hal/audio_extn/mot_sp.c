@@ -73,7 +73,7 @@ typedef enum
 #define CRUS_CONFIG_FILE_SIZE 128
 
 // Payload struct for getting calibration result from DSP module
-struct __attribute__((__packed__)) cirrus_cal_t
+struct cirrus_cal_t
 {
     uint32_t cal_data;
     uint32_t cal_ambient;
@@ -335,7 +335,7 @@ void *cspl_se_parameter_loading_thread()
     usecase->id = USECASE_AUDIO_PLAYBACK_LOW_LATENCY; /* Assuming this is the correct usecase ID (value 1) */
     usecase->type = PCM_PLAYBACK;
     usecase->in_snd_device = SND_DEVICE_NONE;
-    uc_info_rx->stream.out = adev->primary_output;
+    usecase->stream.out = adev->primary_output;
     list_init(&usecase->device_list);
     usecase->out_snd_device = SND_DEVICE_OUT_SPEAKER_EXTERNAL_1;
 
@@ -705,12 +705,12 @@ void spkr_prot_init(void *adev, spkr_prot_init_config_t spkr_prot_init_config_va
     fp_enable_audio_route = spkr_prot_init_config_val.fp_enable_audio_route;
     fp_platform_check_and_set_codec_backend_cfg = spkr_prot_init_config_val.fp_platform_check_and_set_codec_backend_cfg;
 
-    audio_extn_spkr_prot_calib_init();
+    spkr_prot_calib_init();
 }
 
 void spkr_prot_deinit(void)
 {
-    return 0;
+    return;
 }
 
 /**
