@@ -566,9 +566,6 @@ apply_calibration:
             // }
         }
 
-        mixer_ctl = temp_ctl;
-        mixer_close(temp_mixer);
-
         if (mixer_ctl == NULL)
         {
             ALOGE("%s: ctl %s not found, failed to load Speaker Protection(CSPL) speaker calibration",
