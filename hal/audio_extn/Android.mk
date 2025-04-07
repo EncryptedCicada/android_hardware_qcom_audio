@@ -338,7 +338,7 @@ LOCAL_VENDOR_MODULE := true
 
 ifeq ($(strip $(AUDIO_FEATURE_ENABLED_MOTOROLA)),true)
 LOCAL_SRC_FILES:= \
-        mot_sp.c
+        mot_sony.c
 else
 LOCAL_SRC_FILES:= \
         spkr_protection.c
@@ -350,7 +350,10 @@ LOCAL_CFLAGS += \
     -Wno-unused-function \
     -Wno-unused-variable \
 
-ifneq ($(strip $(AUDIO_FEATURE_ENABLED_MOTOROLA)),true)
+ifeq ($(strip $(AUDIO_FEATURE_ENABLED_MOTOROLA)),true)
+LOCAL_CFLAGS += -DDEBUG_SHOW_VALUES
+LOCAL_CFLAGS += -DPERSIST_DEBUG
+else
 LOCAL_CFLAGS += -DSPKR_PROT_ENABLED
 endif
 
