@@ -546,27 +546,24 @@ apply_calibration:
     {
         const char *cal_r_ctl = (type == 0) ? SPK_CAL_R_CTL : RCV_CAL_R_CTL;
 
-        struct mixer *temp_mixer = NULL;
-        struct mixer_ctl *temp_ctl = NULL;
         // Try to get the control with retries in case it's not immediately available
         for (retry_count = 0; retry_count < MAX_MIXER_CTL_RETRY; retry_count++)
         {
-            temp_mixer = mixer_open(adev->snd_card);
-            if (!temp_mixer)
+            mixer_ctl = mixer_get_ctl_by_name(adev->mixer, cal_r_ctl);
+            if (mixer_ctl != NULL)
             {
-                ALOGE("%s: Cannot open mixer for card %d.", __func__, adev->snd_card);
-                return;
-            }
-
-            temp_ctl = mixer_get_ctl_by_name(temp_mixer, cal_r_ctl);
-            if (!temp_ctl)
-            {
-                ALOGW("%s: Speaker Protection(CSPL) ctl %s not found, update ctl and retry",
-                      __func__, cal_r_ctl);
                 break;
             }
 
+            ALOGV("%s: Speaker Protection(CSPL) ctl %s not found, update ctl and retry",
+                  __func__, cal_r_ctl);
             usleep(100000); // 100ms delay
+
+            // ret = mixer_update_ctls(adev->mixer);
+            // if (ret != 0)
+            // {
+            //     ALOGV("mixer_update_ctls return failure, ret %d", ret);
+            // }
         }
 
         mixer_ctl = temp_ctl;
@@ -686,7 +683,8 @@ void spkr_prot_calib_init(void)
 
 void spkr_prot_init(void *adev, spkr_prot_init_config_t spkr_prot_init_config_val)
 {
-    if (!adev) {
+    if (!adev)
+    {
         ALOGE("%s: CIRRUS: Invalid params", __func__);
         return;
     }
