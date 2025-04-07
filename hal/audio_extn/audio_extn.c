@@ -1895,16 +1895,12 @@ void spkr_prot_feature_init(bool is_feature_enabled)
     if (is_feature_enabled) {
         // dlopen lib
 #if LINUX_ENABLED
-        ALOGI("%s: LINUX_ENABLED is set to true somewhere.", __func__);
         spkr_prot_lib_handle = dlopen(SPKR_PROT_LIB_PATH, RTLD_NOW);
 #else
-        ALOGI("%s: LINUX_ENABLED is set to false.", __func__);
         if ((vendor_enhanced_info & 0x3) == 0x0) // Pure AOSP
             spkr_prot_lib_handle = dlopen(CIRRUS_SPKR_PROT_LIB_PATH, RTLD_NOW);
-            ALOGI("%s: spkr_prot_lib_handle is set to: %s", __func__, CIRRUS_SPKR_PROT_LIB_PATH);
         else
             spkr_prot_lib_handle = dlopen(SPKR_PROT_LIB_PATH, RTLD_NOW);
-            ALOGI("%s: spkr_prot_lib_handle is set to: %s", __func__, SPKR_PROT_LIB_PATH);
 #endif
 
         if (spkr_prot_lib_handle == NULL) {
