@@ -265,7 +265,7 @@ static int get_file_data(const char *filepath, void *buf, size_t size, bool reve
     errno = 0;
     value = strtol(buffer, &endptr, 0);
     
-    if (errno == 0 && *endptr == '\0' || *endptr == '\n') {
+    if (errno == 0 && (*endptr == '\0' || *endptr == '\n')) {
         // It's a text file with a number - convert to binary format
         memcpy(buf, &value, size);
     } else {
