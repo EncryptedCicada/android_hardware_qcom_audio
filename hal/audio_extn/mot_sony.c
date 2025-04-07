@@ -108,25 +108,25 @@ struct cirrus_playback_session
 /* Mixer controls */
 #define CIRRUS_CTL_FORCE_WAKE "SPK Hibernate Force Wake"
 
-#define CIRRUS_CTL_CALI_CAL_AMBIENT "SPK DSP1 Calibration cd CAL_AMBIENT"
-#define CIRRUS_CTL_CALI_DIAG_F0 "SPK DSP1 Calibration cd DIAG_F0"
-#define CIRRUS_CTL_CALI_DIAG_F0_STATUS "SPK DSP1 Calibration cd DIAG_F0_STATUS"
-#define CIRRUS_CTL_CALI_DIAG_Z_LOW_DIFF "SPK DSP1 Calibration cd DIAG_Z_LOW_DIFF"
-#define CIRRUS_CTL_CALI_CAL_R "SPK DSP1 Calibration cd CAL_R"
-#define CIRRUS_CTL_CALI_CAL_STATUS "SPK DSP1 Calibration cd CAL_STATUS"
-#define CIRRUS_CTL_CALI_CAL_CHECKSUM "SPK DSP1 Calibration cd CAL_CHECKSUM"
+#define CIRRUS_CTL_CALI_CAL_AMBIENT "SPK DSP1X calibration cd CAL_AMBIENT"
+#define CIRRUS_CTL_CALI_DIAG_F0 "SPK DSP1X calibration cd DIAG_F0"
+#define CIRRUS_CTL_CALI_DIAG_F0_STATUS "SPK DSP1X calibration cd DIAG_F0_STATUS"
+#define CIRRUS_CTL_CALI_DIAG_Z_LOW_DIFF "SPK DSP1X calibration cd DIAG_Z_LOW_DIFF"
+#define CIRRUS_CTL_CALI_CAL_R "SPK DSP1X calibration cd CAL_R"
+#define CIRRUS_CTL_CALI_CAL_STATUS "SPK DSP1X calibration cd CAL_STATUS"
+#define CIRRUS_CTL_CALI_CAL_CHECKSUM "SPK DSP1X calibration cd CAL_CHECKSUM"
 
-#define CIRRUS_CTL_PROT_CAL_AMBIENT "SPK DSP1 Protection cd CAL_AMBIENT"
-#define CIRRUS_CTL_PROT_DIAG_F0 "SPK DSP1 Protection cd DIAG_F0"
-#define CIRRUS_CTL_PROT_DIAG_F0_STATUS "SPK DSP1 Protection cd DIAG_F0_STATUS"
-#define CIRRUS_CTL_PROT_DIAG_Z_LOW_DIFF "SPK DSP1 Protection cd DIAG_Z_LOW_DIFF"
-#define CIRRUS_CTL_PROT_CAL_R "SPK DSP1 Protection cd CAL_R"
-#define CIRRUS_CTL_PROT_CAL_STATUS "SPK DSP1 Protection CAL_STATUS"
-#define CIRRUS_CTL_PROT_CAL_STATUS_CD "SPK DSP1 Protection cd CAL_STATUS"
-#define CIRRUS_CTL_PROT_CAL_CHECKSUM "SPK DSP1 Protection CAL_CHECKSUM"
-#define CIRRUS_CTL_PROT_CAL_CHECKSUM_CD "SPK DSP1 Protection cd CAL_CHECKSUM"
+#define CIRRUS_CTL_PROT_CAL_AMBIENT "SPK DSP1X protection cd CAL_AMBIENT"
+#define CIRRUS_CTL_PROT_DIAG_F0 "SPK DSP1X protection cd DIAG_F0"
+#define CIRRUS_CTL_PROT_DIAG_F0_STATUS "SPK DSP1X protection cd DIAG_F0_STATUS"
+#define CIRRUS_CTL_PROT_DIAG_Z_LOW_DIFF "SPK DSP1X protection cd DIAG_Z_LOW_DIFF"
+#define CIRRUS_CTL_PROT_CAL_R "SPK DSP1X protection cd CAL_R"
+#define CIRRUS_CTL_PROT_CAL_STATUS "SPK DSP1X protection CAL_STATUS"
+#define CIRRUS_CTL_PROT_CAL_STATUS_CD "SPK DSP1X protection cd CAL_STATUS"
+#define CIRRUS_CTL_PROT_CAL_CHECKSUM "SPK DSP1X protection CAL_CHECKSUM"
+#define CIRRUS_CTL_PROT_CAL_CHECKSUM_CD "SPK DSP1X protection cd CAL_CHECKSUM"
 
-#define CIRRUS_CTL_PROT_CSPL_ERRORNO "SPK DSP1 Protection cd CSPL_ERRORNO"
+#define CIRRUS_CTL_PROT_CSPL_ERRORNO "SPK DSP1X protection cd CSPL_ERRORNO"
 
 #define CIRRUS_CTL_NAME_BUF 40
 #define CIRRUS_ERROR_DETECT_SLEEP_US 250000
@@ -992,12 +992,12 @@ static int cirrus_exec_fw_download(const char *fw_type, const char *channel,
 
     if (!strcmp(fw_type, "Protection"))
     {
-        ret = cirrus_format_mixer_name("SPK DSP1 Protection cd CSPL_ENABLE",
+        ret = cirrus_format_mixer_name("SPK DSP1X protection cd CSPL_ENABLE",
                                        channel, ctl_name, sizeof(ctl_name));
     }
     else if (!strcmp(fw_type, "Calibration"))
     {
-        ret = cirrus_format_mixer_name("SPK DSP1 Calibration cd CSPL_ENABLE",
+        ret = cirrus_format_mixer_name("SPK DSP1X calibration cd CSPL_ENABLE",
                                        channel, ctl_name, sizeof(ctl_name));
     }
     else
