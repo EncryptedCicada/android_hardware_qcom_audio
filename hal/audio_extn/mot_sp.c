@@ -660,7 +660,6 @@ apply_calibration:
         }
 
     exit:
-        mixer_close(temp_mixer);
         return;
     }
 }
