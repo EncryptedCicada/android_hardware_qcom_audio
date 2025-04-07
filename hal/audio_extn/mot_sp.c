@@ -112,7 +112,7 @@ struct cirrus_playback_session
 };
 
 // Global handle pointer for the cirrus playback session
-struct cirrus_playback_session handle = NULL;
+struct cirrus_playback_session handle;
 
 /**
  * Read a numeric value from a file
