@@ -25,10 +25,94 @@
 #include <unistd.h>
 #include <cutils/properties.h>
 #include "audio_extn.h"
-#include "mot_sp.h"
+
+// - external function dependency -
+static fp_platform_get_snd_device_name_t fp_platform_get_snd_device_name;
+static fp_platform_get_pcm_device_id_t fp_platform_get_pcm_device_id;
+static fp_get_usecase_from_list_t fp_get_usecase_from_list;
+static fp_enable_disable_snd_device_t fp_disable_snd_device;
+static fp_enable_disable_snd_device_t fp_enable_snd_device;
+static fp_enable_disable_audio_route_t fp_disable_audio_route;
+static fp_enable_disable_audio_route_t fp_enable_audio_route;
+static fp_platform_check_and_set_codec_backend_cfg_t fp_platform_check_and_set_codec_backend_cfg;
+
+typedef enum
+{
+    SPEAKER = 0,
+    RECEIVER = 1,
+} device_identifier;
+
+// CSPL calibration file paths
+#define SPK_CAL_FILE "/mnt/vendor/persist/factory/audio/spk_cal_r"
+#define SPK_AMBIENT_FILE "/mnt/vendor/persist/factory/audio/spk_ambient"
+#define RCV_CAL_FILE "/mnt/vendor/persist/factory/audio/rcv_cal_r"
+#define RCV_AMBIENT_FILE "/mnt/vendor/persist/factory/audio/rcv_ambient"
+
+// Property names
+#define SPK_DEFAULT_RDC_PROP "persist.vendor.audio.default.spkrdc"
+#define RCV_DEFAULT_RDC_PROP "persist.vendor.audio.default.rcvrdc"
+
+// Control names
+#define SPK_FIRMWARE_CTL "SPK DSP1 Firmware"
+#define RCV_FIRMWARE_CTL "RCV DSP1 Firmware"
+#define SPK_CAL_R_CTL "SPK DSP1X protection cd CAL_R"
+#define RCV_CAL_R_CTL "RCV DSP1X protection cd CAL_R"
+#define SPK_CAL_STATUS_CTL "SPK DSP1X protection cd CAL_STATUS"
+#define RCV_CAL_STATUS_CTL "RCV DSP1X protection cd CAL_STATUS"
+#define SPK_CAL_CHECKSUM_CTL "SPK DSP1X protection cd CAL_CHECKSUM"
+#define RCV_CAL_CHECKSUM_CTL "RCV DSP1X protection cd CAL_CHECKSUM"
+#define SPK_BOOT_SWITCH_CTL "SPK DSP1 Boot Switch"
+#define RCV_BOOT_SWITCH_CTL "RCV DSP1 Boot Switch"
+
+#define CSPL_DEFAULT_CAL_AMBIENT 28
+
+// Max retry attempts for control lookup
+#define MAX_MIXER_CTL_RETRY 30
+
+#define CIRRUS_CTL_NAME_BUF 96
+#define CRUS_CONFIG_FILE_SIZE 128
+
+// Payload struct for getting calibration result from DSP module
+struct __attribute__((__packed__)) cirrus_cal_t
+{
+    uint32_t cal_data;
+    uint32_t cal_ambient;
+    bool cal_ok;
+};
+
+struct pcm_config pcm_config_cirrus_rx = {
+    .channels = 8,
+    .rate = 48000,
+    .period_size = 320,
+    .period_count = 4,
+    .format = PCM_FORMAT_S32_LE,
+    .start_threshold = 0,
+    .stop_threshold = INT_MAX,
+    .avail_min = 0,
+};
+
+struct pcm_config pcm_config_cirrus_tx = {
+    .channels = 2,
+    .rate = 48000,
+    .period_size = 320,
+    .period_count = 4,
+    .format = PCM_FORMAT_S16_LE,
+    .start_threshold = 0,
+    .stop_threshold = INT_MAX,
+    .avail_min = 0,
+};
+
+// Cirrus playback session structure
+struct cirrus_playback_session
+{
+    void *adev_handle;
+    struct pcm *pcm_rx;
+    struct cirrus_cal_t spk;
+    struct cirrus_cal_t rcv;
+};
 
 // Global handle pointer for the cirrus playback session
-struct cirrus_playback_session *handle = NULL;
+struct cirrus_playback_session handle = NULL;
 
 /**
  * Read a numeric value from a file
@@ -120,6 +204,251 @@ int read_from_file(const char *file_path, uint32_t *value_out)
 }
 
 /**
+ * Load the Cirrus Logic Speaker Enhancement configuration
+ *
+ * This function configures the Cirrus SE DSP by:
+ * 1. Setting the appropriate audio mode and index
+ * 2. Loading the configuration files
+ * 3. Checking for external configurations before using internal ones
+ *
+ * @return 0 on success, -EINVAL on failure
+ */
+int cspl_se_load_usecase_configs()
+{
+    struct audio_device *adev = handle.adev_handle;
+    struct mixer_ctl *ctl_audio_mode = NULL;
+    struct mixer_ctl *ctl_audio_index = NULL;
+    struct mixer_ctl *ctl_load_config = NULL;
+    int num_enums = 0;
+    int current_index = 0;
+    int max_index = 0;
+    int config_start_index = 0;
+    int ret = 0;
+    char config_path[CRUS_CONFIG_FILE_SIZE] = {0};
+
+    // Get the mixer controls for Cirrus SE
+    ctl_audio_mode = mixer_get_ctl_by_name(adev->mixer, "Cirrus SE Audio Mode");
+    ctl_audio_index = mixer_get_ctl_by_name(adev->mixer, "Cirrus SE Audio Index");
+    ctl_load_config = mixer_get_ctl_by_name(adev->mixer, "Cirrus SE Load Config");
+
+    // Verify all required controls exist
+    if (!ctl_audio_mode || !ctl_audio_index || !ctl_load_config)
+    {
+        ALOGE("%s: Could not get ctl for mixer commands", __func__);
+        return -EINVAL;
+    }
+
+    // Get the number of available audio modes
+    num_enums = mixer_ctl_get_num_enums(ctl_audio_mode);
+
+    // Get the current audio index
+    current_index = mixer_ctl_get_value(ctl_audio_index, 0);
+    if (current_index < 0)
+    {
+        ALOGE("%s: Could not get ctl for usecase index", __func__);
+        return -EINVAL;
+    }
+
+    // Calculate the range of configuration indices
+    config_start_index = current_index;
+    max_index = current_index + num_enums;
+
+    // First, check if external configuration files exist
+    for (int i = config_start_index; i < max_index; i++)
+    {
+        // Construct path to check for external config file
+        sprintf(config_path, "/vendor/firmware/crus_sp_rx%d.bin", i);
+
+        // Check if the file exists
+        if (access(config_path, R_OK) != 0)
+        {
+            // File doesn't exist, no external config available
+            ALOGI("%s: CSPL SE doesn't have external config available, use internal", __func__);
+            return 0;
+        }
+    }
+
+    // External configurations exist, load them
+    for (int i = 0; i < num_enums; i++)
+    {
+        // Set the audio mode
+        mixer_ctl_set_value(ctl_audio_mode, 0, i);
+
+        // Trigger configuration loading
+        mixer_ctl_set_value(ctl_load_config, 0, 1);
+
+        ALOGI("%s: CSPL SE crus_sp_rx%d.bin loaded for Usecase %d",
+              __func__, config_start_index + i, i);
+    }
+
+    // Reset to the original audio mode
+    mixer_ctl_set_value(ctl_audio_mode, 0, config_start_index);
+
+    ALOGI("%s: CSPL Speaker Enhancement loaded external configuration", __func__);
+
+    return 0;
+}
+
+/**
+ * Thread function for loading Cirrus Logic Speaker Enhancement parameters
+ *
+ * This function runs as a background thread to set up the Cirrus DSP with
+ * speaker enhancement parameters. It:
+ * 1. Waits for the audio subsystem to be fully initialized
+ * 2. Creates an audio usecase for the Cirrus DSP
+ * 3. Enables the sound device and audio route
+ * 4. Opens a PCM device for communication with the DSP
+ * 5. Loads the speaker enhancement configuration
+ * 6. Cleans up and exits
+ *
+ * @return NULL (pthread exit)
+ */
+void *cspl_se_parameter_loading_thread()
+{
+    struct audio_device *adev = handle.adev_handle;
+    struct audio_usecase *usecase = NULL;
+    int pcm_device_id;
+    int retry_count = 10;
+    int ret;
+
+    /* Wait for audio subsystem to be ready */
+    while (!adev->platform)
+    {
+        ALOGI("%s: Waiting for audio device...", __func__);
+        sleep(1);
+    }
+
+    /* Check if Cirrus Speaker Enhancement is supported */
+    if (!mixer_get_ctl_by_name(adev->mixer, "Cirrus SE"))
+    {
+        pthread_exit(NULL);
+    }
+
+    /* Allocate and initialize usecase structure */
+    usecase = (struct audio_usecase *)calloc(1, sizeof(struct audio_usecase));
+    if (!usecase)
+    {
+        ALOGE("%s: Failed to allocate memory for usecase", __func__);
+        pthread_exit(NULL);
+    }
+
+    usecase->id = USECASE_AUDIO_PLAYBACK_LOW_LATENCY; /* Assuming this is the correct usecase ID (value 1) */
+    usecase->type = PCM_PLAYBACK;
+    usecase->in_snd_device = SND_DEVICE_NONE;
+    uc_info_rx->stream.out = adev->primary_output;
+    list_init(&usecase->device_list);
+    usecase->out_snd_device = SND_DEVICE_OUT_SPEAKER_EXTERNAL_1;
+
+    /* Lock audio device mutex before modifying usecase list */
+    pthread_mutex_lock(&adev->lock);
+
+    /* Retry loop for PCM device setup */
+    for (; retry_count > 0; retry_count--)
+    {
+        /* Add usecase to the list */
+        list_add_tail(&adev->usecase_list, &usecase->list);
+
+        /* Enable sound device and route */
+        fp_enable_snd_device(adev, usecase->out_snd_device);
+        fp_enable_audio_route(adev, usecase);
+
+        /* Get PCM device ID for this usecase */
+        pcm_device_id = fp_platform_get_pcm_device_id(usecase->id, PCM_PLAYBACK);
+        if (pcm_device_id < 0)
+        {
+            ALOGE("%s: Invalid pcm device for usecase (%d)", __func__, usecase->id);
+            goto cleanup;
+        }
+
+        /* Open PCM device */
+        handle.pcm_rx = pcm_open(adev->snd_card, pcm_device_id, PCM_OUT, &pcm_config_cirrus_rx);
+        if (!handle.pcm_rx || !pcm_is_ready(handle.pcm_rx))
+        {
+            ALOGE("%s: PCM device not ready: %s : wait 10ms and retry (%d)",
+                  __func__, handle.pcm_rx ? pcm_get_error(handle.pcm_rx) : "unknown", retry_count);
+
+            if (handle.pcm_rx)
+            {
+                pcm_close(handle.pcm_rx);
+                handle.pcm_rx = NULL;
+            }
+
+            /* Remove usecase from list and retry */
+            fp_disable_snd_device(adev, usecase->out_snd_device);
+            fp_disable_audio_route(adev, usecase);
+            list_remove(&usecase->list);
+
+            usleep(10000); /* 10ms */
+            continue;
+        }
+
+        /* Start PCM device */
+        ret = pcm_start(handle.pcm_rx);
+        if (ret < 0)
+        {
+            ALOGE("%s: pcm start for RX failed: %s : wait 1s and retry (%d)",
+                  __func__, pcm_get_error(handle.pcm_rx), retry_count);
+
+            if (handle.pcm_rx)
+            {
+                pcm_close(handle.pcm_rx);
+                handle.pcm_rx = NULL;
+            }
+
+            /* Remove usecase from list and retry */
+            fp_disable_snd_device(adev, usecase->out_snd_device);
+            fp_disable_audio_route(adev, usecase);
+            list_remove(&usecase->list);
+
+            sleep(1); /* 1 second */
+            continue;
+        }
+
+        /* Successfully opened and started PCM device */
+        break;
+    }
+
+    /* If retries exhausted, clean up and exit */
+    if (retry_count <= 0)
+    {
+        goto cleanup;
+    }
+
+    /* Load speaker enhancement configurations */
+    ret = cspl_se_load_usecase_configs();
+    if (ret < 0)
+    {
+        ALOGE("%s: Set tuning configs failed (%d)", __func__, ret);
+    }
+
+cleanup:
+    /* Clean up resources */
+    if (handle.pcm_rx)
+    {
+        pcm_close(handle.pcm_rx);
+        handle.pcm_rx = NULL;
+    }
+
+    /* Disable sound device and route */
+    fp_disable_snd_device(adev, usecase->out_snd_device);
+    fp_disable_audio_route(adev, usecase);
+
+    /* Remove usecase from list */
+    list_remove(&usecase->list);
+
+    /* Unlock audio device mutex */
+    pthread_mutex_unlock(&adev->lock);
+
+    /* Free allocated memory */
+    if (usecase)
+    {
+        free(usecase);
+    }
+
+    pthread_exit(NULL);
+}
+
+/**
  * Apply speaker protection calibration
  *
  * @param type 0 for speaker, 1 for receiver
@@ -130,7 +459,7 @@ void cspl_apply_calibration(device_identifier type)
     uint32_t status_value = 0x1000000; // Status value (1 in big-endian format)
     unsigned int checksum_value = 0;
     char ctl_value[CIRRUS_CTL_NAME_BUF] = {0};
-    struct audio_device *adev = handle->adev_handle;
+    struct audio_device *adev = handle.adev_handle;
     struct mixer_ctl *mixer_ctl = NULL;
     int retry_count = 0;
     int ret = 0;
@@ -151,10 +480,10 @@ void cspl_apply_calibration(device_identifier type)
     if (type == 0)
     {
         // Speaker path
-        ret = read_from_file(SPK_CAL_FILE, &handle->spk->cal_data);
+        ret = read_from_file(SPK_CAL_FILE, &handle.spk.cal_data);
         if (ret != -EINVAL)
         {
-            ret = read_from_file(SPK_AMBIENT_FILE, &handle->spk->cal_ambient);
+            ret = read_from_file(SPK_AMBIENT_FILE, &handle.spk.cal_ambient);
             if (ret == -EINVAL)
             {
                 goto use_default_cal;
@@ -168,10 +497,10 @@ void cspl_apply_calibration(device_identifier type)
     else
     {
         // Receiver path
-        ret = read_from_file(RCV_CAL_FILE, &handle->rcv->cal_data);
+        ret = read_from_file(RCV_CAL_FILE, &handle.rcv.cal_data);
         if (ret != -EINVAL)
         {
-            ret = read_from_file(RCV_AMBIENT_FILE, &handle->rcv->cal_ambient);
+            ret = read_from_file(RCV_AMBIENT_FILE, &handle.rcv.cal_ambient);
             if (ret == -EINVAL)
             {
                 goto use_default_cal;
@@ -199,17 +528,17 @@ use_default_cal:
 
         if (type == 0)
         {
-            handle->spk->cal_data = atoi(ctl_value);
-            handle->spk->cal_ambient = CSPL_DEFAULT_CAL_AMBIENT;
+            handle.spk.cal_data = atoi(ctl_value);
+            handle.spk.cal_ambient = CSPL_DEFAULT_CAL_AMBIENT;
         }
         else
         {
-            handle->rcv->cal_data = atoi(ctl_value);
-            handle->rcv->cal_ambient = CSPL_DEFAULT_CAL_AMBIENT;
+            handle.rcv.cal_data = atoi(ctl_value);
+            handle.rcv.cal_ambient = CSPL_DEFAULT_CAL_AMBIENT;
         }
 
         ALOGW("%s: Speaker Protection(CSPL) not calibrated on %s, use default ReDC (%d)",
-              __func__, device_str, (type == 0) ? handle->spk->cal_data : handle->rcv->cal_data);
+              __func__, device_str, (type == 0) ? handle.spk.cal_data : handle.rcv.cal_data);
     }
 
 apply_calibration:
@@ -253,17 +582,17 @@ apply_calibration:
         // Convert calibration value to big-endian format
         if (type == 0)
         {
-            cal_value = ((handle->spk->cal_data & 0xFF) << 24) |
-                        (((handle->spk->cal_data >> 8) & 0xFF) << 16) |
-                        (((handle->spk->cal_data >> 16) & 0xFF) << 8) |
-                        ((handle->spk->cal_data >> 24) & 0xFF);
+            cal_value = ((handle.spk.cal_data & 0xFF) << 24) |
+                        (((handle.spk.cal_data >> 8) & 0xFF) << 16) |
+                        (((handle.spk.cal_data >> 16) & 0xFF) << 8) |
+                        ((handle.spk.cal_data >> 24) & 0xFF);
         }
         else
         {
-            cal_value = ((handle->rcv->cal_data & 0xFF) << 24) |
-                        (((handle->rcv->cal_data >> 8) & 0xFF) << 16) |
-                        (((handle->rcv->cal_data >> 16) & 0xFF) << 8) |
-                        ((handle->rcv->cal_data >> 24) & 0xFF);
+            cal_value = ((handle.rcv.cal_data & 0xFF) << 24) |
+                        (((handle.rcv.cal_data >> 8) & 0xFF) << 16) |
+                        (((handle.rcv.cal_data >> 16) & 0xFF) << 8) |
+                        ((handle.rcv.cal_data >> 24) & 0xFF);
         }
 
         ret = mixer_ctl_set_array(mixer_ctl, &cal_value, 1);
@@ -274,9 +603,9 @@ apply_calibration:
         }
 
         if (type == 0)
-            handle->spk->cal_ok = true;
+            handle.spk.cal_ok = true;
         else
-            handle->rcv->cal_ok = true;
+            handle.rcv.cal_ok = true;
 
         ALOGI("%s: write %s Protection(CSPL) speaker calibration %x %x %x %x (big-endian)",
               __func__, device_str,
@@ -301,7 +630,7 @@ apply_calibration:
         mixer_ctl = mixer_get_ctl_by_name(adev->mixer, cal_checksum_ctl);
 
         // Checksum is original value + 1, converted to big endian
-        uint32_t checksum = ((type == 0) ? handle->spk->cal_data : handle->rcv->cal_data) + 1;
+        uint32_t checksum = ((type == 0) ? handle.spk.cal_data : handle.rcv.cal_data) + 1;
         checksum_value = ((checksum & 0xFF) << 24) |
                          (((checksum >> 8) & 0xFF) << 16) |
                          (((checksum >> 16) & 0xFF) << 8) |
@@ -347,7 +676,7 @@ apply_calibration:
  *
  * @return 0 on success, non-zero on failure
  */
-void audio_extn_spkr_prot_calib_init(void)
+void spkr_prot_calib_init(void)
 {
     cspl_apply_calibration(SPEAKER);  // Try CSPL speaker
     cspl_apply_calibration(RECEIVER); // Try CSPL receiver
@@ -355,57 +684,108 @@ void audio_extn_spkr_prot_calib_init(void)
     return;
 }
 
-void *audio_extn_mot_spkr_prot_init(void *adev)
+void spkr_prot_init(void *adev, spkr_prot_init_config_t spkr_prot_init_config_val)
 {
-    struct cirrus_playback_session *handle = (struct cirrus_playback_session *)calloc(1, sizeof(struct cirrus_playback_session));
-    if (handle == NULL)
-    {
-        ALOGE("%s: memory allocation failure: mot_prot_data", __func__);
-        return NULL;
-    }
-
-    handle->adev_handle = adev;
-
-    handle->spk = (struct cirrus_cal_t *)calloc(1, sizeof(struct cirrus_cal_t));
-    if (handle->spk == NULL)
-    {
-        ALOGE("%s: memory allocation failure: spk", __func__);
-        free(handle);
-        return NULL;
-    }
-
-    handle->rcv = (struct cirrus_cal_t *)calloc(1, sizeof(struct cirrus_cal_t));
-    if (handle->rcv == NULL)
-    {
-        ALOGE("%s: memory allocation failure: rcv", __func__);
-        free(handle->spk);
-        free(handle);
-        return NULL;
-    }
-
-    audio_extn_spkr_prot_calib_init();
-
-    return handle;
-}
-
-void audio_extn_mot_spkr_prot_deinit(void *mot_handle)
-{
-    struct cirrus_playback_session *handle = (struct cirrus_playback_session *)mot_handle;
-
-    if (handle == NULL)
-    {
+    if (!adev) {
+        ALOGE("%s: CIRRUS: Invalid params", __func__);
         return;
     }
 
-    if (handle->spk != NULL)
+    memset(&handle, 0, sizeof(handle));
+
+    handle.adev_handle = adev;
+
+    // init function pointers
+    fp_platform_get_snd_device_name = spkr_prot_init_config_val.fp_platform_get_snd_device_name;
+    fp_platform_get_pcm_device_id = spkr_prot_init_config_val.fp_platform_get_pcm_device_id;
+    fp_get_usecase_from_list = spkr_prot_init_config_val.fp_get_usecase_from_list;
+    fp_disable_snd_device = spkr_prot_init_config_val.fp_disable_snd_device;
+    fp_enable_snd_device = spkr_prot_init_config_val.fp_enable_snd_device;
+    fp_disable_audio_route = spkr_prot_init_config_val.fp_disable_audio_route;
+    fp_enable_audio_route = spkr_prot_init_config_val.fp_enable_audio_route;
+    fp_platform_check_and_set_codec_backend_cfg = spkr_prot_init_config_val.fp_platform_check_and_set_codec_backend_cfg;
+
+    audio_extn_spkr_prot_calib_init();
+}
+
+void spkr_prot_deinit(void)
+{
+    return 0;
+}
+
+/**
+ * Implementation for the speaker protection start processing
+ *
+ * This function handles mapping regular speaker devices to their
+ * protected variants and enabling the necessary processing.
+ *
+ * @param snd_device The sound device ID
+ * @return 0 on success, non-zero on failure
+ */
+/*
+int spkr_prot_start_processing(snd_device_t snd_device)
+{
+    int ret = 0;
+    snd_device_t protected_snd_device;
+
+    // Check if speaker protection is enabled
+    if (!handle.cal_ok)
     {
-        free(handle->spk);
+        return 0;
     }
 
-    if (handle->rcv != NULL)
+    // Map the regular sound device to its protected variant
+    protected_snd_device = get_spkr_prot_snd_device(snd_device);
+
+    // If the device isn't changed, no protection needed
+    if (protected_snd_device == snd_device)
     {
-        free(handle->rcv);
+        return 0;
     }
 
-    free(handle);
+    ALOGI("%s: Processing started for snd_device=%d (protected=%d)",
+          __func__, snd_device, protected_snd_device);
+
+    // Additional processing logic would go here
+
+    return ret;
+}*/
+
+// FIXME: Fix start and stop processing functions. Find out what they do and implement accordingly.
+/* Dummy, since decompilation is not good */
+int spkr_prot_start_processing(__unused snd_device_t snd_device)
+{
+    return 0;
+}
+
+/* Dummy, since decompilation is not good */
+int spkr_prot_stop_processing(__unused snd_device_t snd_device)
+{
+    return 0;
+}
+
+bool spkr_prot_is_enabled()
+{
+    return true;
+}
+
+int get_spkr_prot_snd_device(snd_device_t snd_device)
+{
+    switch (snd_device)
+    {
+    case SND_DEVICE_OUT_SPEAKER:
+    case SND_DEVICE_OUT_SPEAKER_REVERSE:
+        return SND_DEVICE_OUT_SPEAKER_PROTECTED;
+    case SND_DEVICE_OUT_SPEAKER_SAFE:
+        return SND_DEVICE_OUT_SPEAKER_SAFE;
+    case SND_DEVICE_OUT_VOICE_SPEAKER:
+        return SND_DEVICE_OUT_VOICE_SPEAKER_PROTECTED;
+    default:
+        return snd_device;
+    }
+}
+
+void spkr_prot_calib_cancel(__unused void *adev)
+{
+    return;
 }
