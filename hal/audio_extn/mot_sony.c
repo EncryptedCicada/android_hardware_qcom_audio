@@ -229,6 +229,9 @@ static int get_file_data(const char *filepath, void *buf, size_t size, bool reve
     int i, ret = 0;
     long file_size;
     
+    // Initialize buffer with zeros (for padding if file is smaller)
+    memset(buf, 0, size);
+    
     fp = fopen(filepath, "rb");
     if (fp == NULL) {
         ALOGE("%s: Cannot open file %s for reading: %s", __func__, filepath, strerror(errno));
@@ -239,10 +242,9 @@ static int get_file_data(const char *filepath, void *buf, size_t size, bool reve
     file_size = ftell(fp);
     rewind(fp);
     
-    // Verify file size is reasonable and large enough
-    if (file_size <= 0 || file_size < size || file_size >= 32) {
-        ALOGE("%s: '%s' file size error: %ld (expected %zu)", __func__, filepath, file_size, size);
-        ret = -EINVAL;
+    if (file_size <= 0) {
+        ALOGW("%s: File %s is empty, using zeros for padding", __func__, filepath);
+        ret = 0;  // Not treating as error, returning success with zeros
         goto exit;
     }
     
@@ -266,17 +268,20 @@ static int get_file_data(const char *filepath, void *buf, size_t size, bool reve
     value = strtol(buffer, &endptr, 0);
     
     if (errno == 0 && (*endptr == '\0' || *endptr == '\n')) {
-        // It's a text file with a number - convert to binary format
-        memcpy(buf, &value, size);
+        // It's a text file with a number - convert to binary
+        memcpy(buf, &value, (file_size < size) ? file_size : size);
+        ALOGV("%s: Converted text value %ld from file %s", __func__, value, filepath);
     } else {
-        // It's already binary data - use as-is
-        memcpy(buf, buffer, size);
+        // It's binary data - use as-is up to the size we have
+        memcpy(buf, buffer, (file_size < size) ? file_size : size);
+        ALOGV("%s: Read %ld bytes as binary from %s (expected %zu), zero-padded", 
+              __func__, file_size, filepath, size);
     }
     
     free(buffer);
     
     if (reverse) {
-        /* Invert the array, because DSP firmware expects inverted values */
+        /* Invert the array, because Sony firmware expects inverted values */
         for (i = 0; i < size / 2; i++) {
             tmp = array[i];
             array[i] = array[size - i - 1];
@@ -285,8 +290,8 @@ static int get_file_data(const char *filepath, void *buf, size_t size, bool reve
     }
     
 #ifdef PERSIST_DEBUG
-    ALOGI("%s: Read file %s (size=%zu) values: 0x%x 0x%x 0x%x 0x%x",
-          __func__, filepath, size, array[0], array[1], array[2], array[3]);
+    ALOGI("%s: Read file %s (actual size=%ld, expected=%zu) values: 0x%x 0x%x 0x%x 0x%x",
+          __func__, filepath, file_size, size, array[0], array[1], array[2], array[3]);
 #endif
 
 exit:
