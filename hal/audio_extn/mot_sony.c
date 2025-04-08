@@ -343,7 +343,7 @@ void spkr_prot_init(void *adev, spkr_prot_init_config_t spkr_prot_init_config_va
     handle.state = INIT;
 
     /* Ambient */
-    ret = get_file_data(PERSIST_CIRRUS_CAL_GLOBAL_CAL_AMBIENT, &cal_ambient, sizeof(cal_ambient), true);
+    ret = get_file_data(PERSIST_CIRRUS_CAL_GLOBAL_CAL_AMBIENT, &cal_ambient, sizeof(cal_ambient), false);
     if (ret)
         return;
 
