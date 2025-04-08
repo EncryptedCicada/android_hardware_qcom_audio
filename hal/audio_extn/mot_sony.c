@@ -156,70 +156,6 @@ uint8_t cal_ambient[4];
 static void *cirrus_do_calibration();
 static void *cirrus_failure_detect_thread();
 
-void log_mixer_controls(int card)
-{
-    struct mixer *mixer = mixer_open(card);
-    if (!mixer)
-    {
-        ALOGE("Failed to open mixer for card %d", card);
-        return;
-    }
-    unsigned int num_controls = mixer_get_num_ctls(mixer);
-    ALOGI("Mixer has %u controls on card %d", num_controls, card);
-    for (unsigned int i = 0; i < num_controls; ++i)
-    {
-        struct mixer_ctl *ctl = mixer_get_ctl(mixer, i);
-        if (!ctl)
-            continue;
-        const char *name = mixer_ctl_get_name(ctl);
-        enum mixer_ctl_type type = mixer_ctl_get_type(ctl);
-        unsigned int num_values = mixer_ctl_get_num_values(ctl);
-        ALOGI("Control #%d: Name='%s', Type=%d, Num Values=%u",
-              i, name, type, num_values);
-        switch (type)
-        {
-        case MIXER_CTL_TYPE_BOOL:
-        case MIXER_CTL_TYPE_INT:
-        case MIXER_CTL_TYPE_BYTE:
-        case MIXER_CTL_TYPE_INT64:
-            for (unsigned int j = 0; j < num_values; ++j)
-            {
-                int value = mixer_ctl_get_value(ctl, j);
-                ALOGI(" Value[%d]: %d", j, value);
-            }
-            break;
-        case MIXER_CTL_TYPE_ENUM:
-            {
-                unsigned int num_enums = mixer_ctl_get_num_enums(ctl);
-                ALOGI(" Enum has %u possible values", num_enums);
-                
-                // Log current enum value(s)
-                for (unsigned int j = 0; j < num_values; ++j) 
-                {
-                    int enum_idx = mixer_ctl_get_value(ctl, j);
-                    if (enum_idx >= 0 && enum_idx < (int)num_enums) {
-                        const char *enum_string = mixer_ctl_get_enum_string(ctl, enum_idx);
-                        ALOGI(" Value[%d]: %s (%d)", j, enum_string, enum_idx);
-                    } else {
-                        ALOGW(" Value[%d]: Invalid enum index %d", j, enum_idx);
-                    }
-                }
-                
-                // Optionally list all possible enum values
-                for (unsigned int k = 0; k < num_enums; ++k) {
-                    const char *enum_string = mixer_ctl_get_enum_string(ctl, k);
-                    ALOGV("   Enum[%d]: %s", k, enum_string);
-                }
-            }
-            break;
-        default:
-            ALOGW(" Unknown or unsupported type: %d", type);
-            break;
-        }
-    }
-    mixer_close(mixer);
-}
-
 /* File-based calibration data handling instead of TA */
 static int get_file_data(const char *filepath, void *buf, size_t size, bool reverse)
 {
@@ -1023,10 +959,6 @@ retry_fw:
      * is useless, the firmware at least won't be booted for sure.
      */
     usleep(CIRRUS_FIRMWARE_LOAD_SLEEP_US);
-
-#ifdef DEBUG_SHOW_VALUES
-    log_mixer_controls(0);
-#endif
 
     ret = cirrus_get_mixer_array_by_name(ctl_name, &cspl_ena, 4);
     if (ret < 0)
