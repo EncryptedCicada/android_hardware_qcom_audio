@@ -140,11 +140,11 @@ struct cirrus_playback_session
 #endif
 
 struct pcm_config pcm_config_cirrus_rx = {
-    .channels = 8,
+    .channels = 2,
     .rate = 48000,
     .period_size = 320,
     .period_count = 4,
-    .format = PCM_FORMAT_S32_LE,
+    .format = PCM_FORMAT_S16_LE,
     .start_threshold = 0,
     .stop_threshold = INT_MAX,
     .avail_min = 0,
