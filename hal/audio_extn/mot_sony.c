@@ -767,6 +767,10 @@ static int cirrus_play_silence(int seconds)
         goto exit;
     }
 
+    ALOGD("%s: Attempting to open PCM device %d with config: channels=%d, rate=%d, format=%d", 
+        __func__, pcm_dev_rx_id, pcm_config_cirrus_rx.channels, 
+        pcm_config_cirrus_rx.rate, pcm_config_cirrus_rx.format);
+
     handle.pcm_rx = pcm_open(adev->snd_card, pcm_dev_rx_id,
                              (PCM_OUT | PCM_MONOTONIC),
                              &pcm_config_cirrus_rx);
@@ -796,6 +800,8 @@ static int cirrus_play_silence(int seconds)
         goto exit;
     }
 
+    ALOGD("%s: Allocated silence buffer: %p, size=%d bytes", __func__, silence, frames_bytes);
+
     silence_cnt = pcm_frames_to_bytes(handle.pcm_rx, pcm_config_cirrus_rx.rate);
     silence_cnt = silence_cnt * seconds / frames_bytes + 1;
 
@@ -803,10 +809,12 @@ static int cirrus_play_silence(int seconds)
           __func__, seconds, silence_cnt);
     for (i = 0; i <= silence_cnt; i++)
     {
+        ALOGD("%s: Writing PCM data iteration %d/%d, buffer=%p, size=%d", 
+            __func__, i, silence_cnt, silence, frames_bytes);
         ret = pcm_write(handle.pcm_rx, silence, frames_bytes);
         if (ret)
         {
-            ALOGE("%s: Cannot write PCM data: %d", __func__, ret);
+            ALOGE("%s: Cannot write PCM data: %d, error: %s", __func__, ret, pcm_get_error(handle.pcm_rx));
             break;
         }
         else
