@@ -140,11 +140,11 @@ struct cirrus_playback_session
 #endif
 
 struct pcm_config pcm_config_cirrus_rx = {
-    .channels = 2,
+    .channels = 8,
     .rate = 48000,
     .period_size = 320,
     .period_count = 4,
-    .format = PCM_FORMAT_S16_LE,
+    .format = PCM_FORMAT_S32_LE,
     .start_threshold = 0,
     .stop_threshold = INT_MAX,
     .avail_min = 0,
@@ -685,7 +685,7 @@ static int cirrus_play_silence(int seconds)
     uc_info_rx->in_snd_device = SND_DEVICE_NONE;
     uc_info_rx->stream.out = adev->primary_output;
     list_init(&uc_info_rx->device_list);
-    uc_info_rx->out_snd_device = SND_DEVICE_OUT_SPEAKER_PROTECTED;
+    uc_info_rx->out_snd_device = SND_DEVICE_OUT_SPEAKER;
     list_add_tail(&adev->usecase_list, &uc_info_rx->list);
 
     fp_platform_check_and_set_codec_backend_cfg(adev, uc_info_rx,
